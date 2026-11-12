@@ -1,0 +1,5 @@
+# GitHub-hosted macOS 27 arm64 label; actionlint 1.7.12 predates this image.
+# The validator's custom-label list also supports new hosted runner labels.
+self-hosted-runner:
+  labels:
+    - xcode-27

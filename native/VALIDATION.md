@@ -21,8 +21,9 @@ or notarized. At the user's request it was installed into
 `/Applications/CBittorrent.app`; the installed bundle matched the build artifact,
 passed the signature/dependency audit, and launched successfully with its normal
 application profile. No installer or GitHub release was published.
-Retained upstream GitHub Actions still assume the old Qt/cross-platform build
-and need migration before a release push; their success is not claimed here.
+The original validation predates the native CI migration. The current workflow
+and local reproduction command are documented in `README.md`; remote acceptance
+is recorded by the GitHub Actions run associated with each commit.
 
 ## Engine integration
 

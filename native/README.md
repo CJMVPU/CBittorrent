@@ -112,3 +112,38 @@ Manual acceptance should additionally cover external `.torrent` and magnet
 opening and visual inspection of the compact window, floating inspector and
 in-window settings. Real public tracker and Internet transfer checks remain
 separate from these local checks.
+
+## GitHub Actions
+
+`Native macOS CI` runs on pushes to `master` and `codex/**`, pull requests into
+`master`, and manual dispatch. It uses GitHub's `xcode-27` arm64 runner, which
+runs macOS 27; the environment step rejects older OS/SDK versions and Intel.
+The runner label is documented in the
+[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+and the [image inventory](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md).
+
+The workflow installs only native build dependencies and validation tools,
+checks workflows and shell/Python syntax, builds the Release bundle, runs CTest,
+and verifies arm64 architecture, deployment target, dependency closure, font
+integrity and ad-hoc signing. It then creates a ZIP, extracts it and repeats
+signature/dependency checks to verify the archived app.
+
+Successful runs upload `CBittorrent-macOS27-arm64-<commit>` containing the app
+ZIP, SHA-256 checksum, dependency provenance and toolchain details. Diagnostics
+are uploaded even when a build/test fails. These are ad-hoc-signed CI builds,
+not notarized releases. No installation or user profile modification occurs.
+All third-party actions are pinned to commit SHAs; the token is read-only and
+checkout credentials are not persisted. Older runs for the same branch/PR are
+cancelled when superseded.
+
+Run the same build/test/package sequence locally with:
+
+```sh
+native/scripts/ci.sh verify
+```
+
+The old Qt/Linux/Windows build matrices, Web UI/search-plugin checks, legacy
+file-health workflow and upstream stale-PR bot were retired. Their definitions
+remain in Git history. Native workflow and source validation now live in the
+single macOS workflow, alongside the actual application build and engine test.
+Fork owners must enable Actions once before the first run.
