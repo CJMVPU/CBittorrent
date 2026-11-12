@@ -1,59 +1,58 @@
-# qBittorrent - A BitTorrent client in Qt
+# CBittorrent
 
-[![GitHub Actions CI Status](https://github.com/qbittorrent/qBittorrent/actions/workflows/ci_ubuntu.yaml/badge.svg)](https://github.com/qbittorrent/qBittorrent/actions)
+CBittorrent is a native BitTorrent client for **macOS 27 and newer on Apple
+Silicon**. Its interface uses Swift and AppKit; a small Objective-C++ bridge
+connects it directly to [libtorrent-rasterbar](https://libtorrent.org/).
+The native app has **no Qt build or runtime dependency**.
 
-qBittorrent is a [BitTorrent] client programmed in C++ / Qt that uses
-[libtorrent] (sometimes called libtorrent-rasterbar) by Arvid Norberg.
+This repository began as a fork of [qBittorrent](https://www.qbittorrent.org/).
+Its original `src/`, `test/`, `dist/`, and legacy CMake modules remain available
+as implementation references. They are not compiled into CBittorrent. The root
+CMake entry point now builds only the native app; it does not discover Qt.
+This is an independent early implementation, not a feature-complete port of
+qBittorrent and not an official qBittorrent release.
 
-It aims to be a good alternative to all other BitTorrent clients
-out there. qBittorrent is fast, stable and provides Unicode
-support as well as many features.
+## Build and run
 
-The free [IP to Country Lite database] by [DB-IP] is used for resolving the countries of peers.
-The database is licensed under the [Creative Commons Attribution 4.0 International License].
+On an Apple Silicon Mac with Xcode and the macOS 27+ SDK:
 
-[BitTorrent]: https://en.wikipedia.org/wiki/BitTorrent
-[Creative Commons Attribution 4.0 International License]: https://creativecommons.org/licenses/by/4.0/
-[DB-IP]: https://db-ip.com/
-[IP to Country Lite database]: https://db-ip.com/db/download/ip-to-country-lite
-[libtorrent]: https://libtorrent.org/
+```sh
+brew install libtorrent-rasterbar pkg-config
+./native/build.sh
+open build/native/CBittorrent.app
+```
 
-## Installation
+The script builds arm64 only, bundles non-system libraries, includes licenses,
+signs the app ad hoc, and audits the entire bundle for Qt and external library
+references. Build dependencies remain developer requirements; the resulting
+app includes its libtorrent and OpenSSL libraries.
 
-Refer to the [INSTALL] file.
+[Native implementation and validation](native/README.md) · [Migration map](native/MIGRATION.md) · [Installation](INSTALL)
 
-[INSTALL]: INSTALL
+## Interface direction
 
-## License
+The silver titanium interface uses a fixed 1000 × 680 window, compact custom
+window controls, a single row for filters and task actions, fixed-width task
+columns, a floating inspector, and a bottom status bar. Settings occupy the
+same main window. The font is the bundled **LXGW WenKai Mono Medium**, licensed
+under the [SIL Open Font License](native/Resources/Fonts/OFL.txt).
 
-Refer to the [COPYING] file.
+## Scope and data
 
-[COPYING]: COPYING
+The native app starts with the core torrent workflow: adding `.torrent` files
+and magnet links, viewing task progress and transfer rates, pausing/resuming,
+removing tasks, inspecting files and trackers, changing file priorities, viewing peer counts,
+saving resume data, and setting
+basic transfer limits. See the native documentation for current limitations.
+Existing qBittorrent settings and torrent state are not automatically migrated;
+CBittorrent keeps its own profile and does not overwrite the legacy profile.
 
-## PGP Public Key
+## Attribution and license
 
-Starting from v3.3.4 all source tarballs and binaries are signed. \
-The key currently used is 4096R/[5B7CC9A2](https://pgp.mit.edu/pks/lookup?op=get&search=0x6E4A2D025B7CC9A2) with fingerprint `D8F3DA77AAC6741053599C136E4A2D025B7CC9A2`. \
-You can also [download it](https://github.com/qbittorrent/qBittorrent/raw/master/5B7CC9A2.asc). \
-**PREVIOUSLY** the following key was used to sign the v3.3.4 source tarballs and v3.3.4 Windows installer **only**: 4096R/[520EC6F6](https://pgp.mit.edu/pks/lookup?op=get&search=0xA1ACCAE4520EC6F6) with fingerprint `F4A5FD201B117B1C2AB590E2A1ACCAE4520EC6F6`.
-
-## Misc
-
-For more information please visit:
-<https://www.qbittorrent.org>
-
-Check out our wiki at:
-<https://wiki.qbittorrent.org>
-
-Use the forum for troubleshooting before reporting bugs:
-<https://forum.qbittorrent.org>
-
-Please report any bug (or feature request) to:
-<https://bugs.qbittorrent.org>
-
-Official IRC channel:
-[#qbittorrent on irc.libera.chat](ircs://irc.libera.chat:6697/qbittorrent)
-
------------------------------------------------------
-
-sledgehammer999 \<<sledgehammer999@qbittorrent.org>\>
+qBittorrent's source and its original copyright notices are retained. Refer to
+[COPYING](COPYING) for the repository's licensing terms and exceptions. New
+native source is distributed under the same applicable project terms.
+libtorrent, OpenSSL, Boost, and the bundled font have their own licenses; the
+app build includes dependency license texts in `Contents/Resources/Licenses`
+and the font's license alongside the font. CBittorrent is not associated with
+or endorsed by those upstream projects.

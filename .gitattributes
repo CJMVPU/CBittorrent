@@ -5,6 +5,7 @@ core.eol=lf
 *.png binary
 *.qm binary
 *.zip binary
+*.ttf binary
 
 dist/windows/license.txt text eol=crlf
 test/testdata/crlf.txt text eol=crlf
@@ -12,3 +13,6 @@ test/testdata/crlf.txt text eol=crlf
 # disable line endings conversions
 dist/windows/3rdparty/* -text
 src/base/3rdparty/expected.hpp -text
+
+# Preserve upstream license formatting verbatim.
+native/Resources/Fonts/OFL.txt whitespace=-blank-at-eol
