@@ -29,7 +29,32 @@ final class QuietHeaderView: NSTableHeaderView {
     }
 }
 
+/// Extend the same row bands through unused space, including an empty table.
+final class StripedTransferTableView: NSTableView {
+    override func drawBackground(inClipRect clipRect: NSRect) {
+        Titanium.panel.setFill()
+        clipRect.fill()
+        let pitch = rowHeight + intercellSpacing.height
+        guard pitch > 0 else { return }
+        let first = max(0, Int(floor(clipRect.minY / pitch)))
+        let last = Int(ceil(clipRect.maxY / pitch))
+        guard first <= last else { return }
+        NSColor(hex: 0xF2F4F7).setFill()
+        for row in first...last where row % 2 == 1 {
+            NSRect(x: clipRect.minX, y: CGFloat(row) * pitch,
+                   width: clipRect.width, height: pitch).intersection(clipRect).fill()
+        }
+    }
+}
+
 final class TransferRowView: NSTableRowView {
+    var alternate = false { didSet { needsDisplay = true } }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        (alternate ? NSColor(hex: 0xF2F4F7) : Titanium.panel).setFill()
+        dirtyRect.fill()
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         Titanium.selection.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()

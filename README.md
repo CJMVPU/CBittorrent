@@ -31,9 +31,9 @@ app includes its libtorrent and OpenSSL libraries.
 
 ## Interface direction
 
-The silver titanium interface uses a fixed 1000 × 680 window, compact custom
+The silver titanium interface uses a fixed 900 × 600 window, compact custom
 window controls, a single row for filters and task actions, fixed-width task
-columns, a floating inspector, and a bottom status bar. Settings occupy the
+columns, and a bottom status bar. Settings and task workflows occupy the
 same main window. The font is the bundled **LXGW WenKai Mono Medium**, licensed
 under the [SIL Open Font License](native/Resources/Fonts/OFL.txt).
 

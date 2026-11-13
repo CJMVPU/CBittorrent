@@ -1,5 +1,4 @@
 import AppKit
-import UniformTypeIdentifiers
 import UserNotifications
 
 @MainActor
@@ -10,11 +9,14 @@ final class AppStore {
     var searchText = ""
     private(set) var settings: AppSettings
     var onChange: (() -> Void)?
+    var onStatusChange: (() -> Void)?
+    var onPresent: ((InWindowRequest) -> Void)?
     private let engine: EngineService
     private let settingsURL: URL
     private var polling: Task<Void, Never>?
     private var shownErrors = Set<String>()
     private var stopping = false
+    private var savingSettings = false
 
     init(profile: URL) throws {
         try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
@@ -22,7 +24,8 @@ final class AppStore {
         if FileManager.default.fileExists(atPath: settingsURL.path) {
             settings = try JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: settingsURL))
         } else { settings = AppSettings() }
-        engine = try EngineService(profilePath: profile.appendingPathComponent("Session").path)
+        settings = try settings.validated()
+        engine = try EngineService(profilePath: profile.appendingPathComponent("Session").path, settings: settings)
     }
 
     var filteredTorrents: [TorrentSnapshot] {
@@ -37,7 +40,6 @@ final class AppStore {
     func start() {
         polling = Task { [weak self] in
             guard let self else { return }
-            do { try await self.applyLimits(self.settings) } catch { self.present(error) }
             var tick = 0
             while !Task.isCancelled && !self.stopping {
                 await self.refresh()
@@ -64,6 +66,7 @@ final class AppStore {
                 }
             }
             snapshot = next
+            onStatusChange?()
             selectedIDs.formIntersection(Set(next.torrents.map(\.id)))
             onChange?()
             for error in next.errors { presentOnce(error) }
@@ -79,36 +82,37 @@ final class AppStore {
     }
 
     func add(sources: [String]) {
-        let destination = settings.downloadPath
-        let paused = settings.addPaused
-        run { [self] in
-            try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
-            for source in sources { try await engine.add(source: source, savePath: destination, paused: paused) }
+        addFromForm(sources: sources) { [weak self] _, error in
+            if let error { self?.present(ClientError.message(error)) }
         }
     }
 
-    func addTorrentPrompt() {
-        let alert = NSAlert()
-        alert.messageText = "添加下载任务"
-        alert.informativeText = "粘贴磁力链接，或选择 .torrent 文件。下载位置：\(settings.downloadPath)"
-        alert.addButton(withTitle: "添加磁力链接")
-        alert.addButton(withTitle: "选择种子文件…")
-        alert.addButton(withTitle: "取消")
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 430, height: 26))
-        input.placeholderString = "magnet:?xt=urn:btih:…"
-        alert.accessoryView = input
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let source = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard source.lowercased().hasPrefix("magnet:?") else { present(ClientError.message("请输入有效的 magnet 磁力链接。")); return }
-            add(sources: ["magnet:" + source.dropFirst(7)])
-        } else if response == .alertSecondButtonReturn {
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = [UTType(filenameExtension: "torrent") ?? .data]
-            panel.allowsMultipleSelection = true
-            panel.canChooseDirectories = false
-            if panel.runModal() == .OK { add(sources: panel.urls.map(\.path)) }
+    /// Reports accepted sources so a partially successful batch is not submitted twice.
+    func addFromForm(sources: [String], completion: @escaping ([String], String?) -> Void) {
+        guard !stopping else { completion([], "下载引擎正在关闭。"); return }
+        let destination = settings.downloadPath
+        let paused = settings.addPaused
+        Task {
+            var accepted: [String] = []
+            var failure: String?
+            do {
+                try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
+                for source in sources {
+                    try await engine.add(source: source, savePath: destination, paused: paused)
+                    accepted.append(source)
+                }
+            } catch { failure = error.localizedDescription }
+            do { try await engine.save() }
+            catch { failure = [failure, "任务保存失败：\(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n") }
+            await refresh()
+            completion(accepted, failure)
         }
+    }
+
+    func addTorrentPrompt() { onPresent?(.add) }
+
+    func chooseDirectory(initial: URL, onSelect: @escaping (URL) -> Void) {
+        onPresent?(.chooseDirectory(initial: initial, onSelect: onSelect))
     }
 
     func startSelected() {
@@ -119,91 +123,105 @@ final class AppStore {
         let ids = selectedIDs
         run { [self] in for id in ids { try await engine.pause(id: id) } }
     }
+    func startAll() {
+        let ids = snapshot.torrents.map(\.id)
+        run { [self] in for id in ids { try await engine.resume(id: id) } }
+    }
+    func pauseAll() {
+        let ids = snapshot.torrents.map(\.id)
+        run { [self] in for id in ids { try await engine.pause(id: id) } }
+    }
+    func applyDefaultTrackers(completion: @escaping (Int?) -> Void) {
+        guard !stopping, !savingSettings else { completion(nil); return }
+        Task {
+            do {
+                let changed = try await engine.applyDefaultTrackers()
+                try await engine.save()
+                await refresh()
+                completion(changed)
+            } catch { completion(nil); present(error) }
+        }
+    }
     func removeSelected() {
-        let ids = selectedIDs
-        guard !ids.isEmpty else { return }
-        let alert = NSAlert()
-        alert.messageText = "移除 \(ids.count) 个下载任务？"
-        alert.informativeText = "默认保留已下载的文件。"
-        alert.addButton(withTitle: "移除任务")
-        alert.addButton(withTitle: "取消")
-        let checkbox = NSButton(checkboxWithTitle: "同时永久删除下载文件", target: nil, action: nil)
-        checkbox.setFrameSize(NSSize(width: 320, height: 24))
-        alert.accessoryView = checkbox
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let deleteFiles = checkbox.state == .on
-        run { [self] in for id in ids { try await engine.remove(id: id, deleteFiles: deleteFiles) } }
+        guard !selectedIDs.isEmpty else { return }
+        onPresent?(.remove(ids: selectedIDs))
+    }
+
+    func confirmedRemove(ids: Set<String>, deleteFiles: Bool, completion: @escaping (String?) -> Void) {
+        guard !stopping else { completion("下载引擎正在关闭。"); return }
+        let existing = ids.intersection(Set(snapshot.torrents.map(\.id)))
+        Task {
+            var failure: String?
+            do {
+                for id in existing { try await engine.remove(id: id, deleteFiles: deleteFiles) }
+                try await engine.save()
+            } catch { failure = error.localizedDescription }
+            await refresh()
+            completion(failure)
+        }
+    }
+
+    func applyFilePriority(id: String, index: Int, priority: Int, completion: @escaping (String?) -> Void) {
+        guard !stopping else { completion("下载引擎正在关闭。"); return }
+        Task {
+            do {
+                try await engine.setFilePriority(id: id, index: index, priority: priority)
+                try await engine.save()
+                await refresh()
+                completion(nil)
+            } catch { completion(error.localizedDescription) }
+        }
     }
     func revealSelected() {
         guard let torrent = selectedTorrent else { return }
         let url = URL(fileURLWithPath: torrent.savePath)
-        NSWorkspace.shared.open(url)
+        onPresent?(.browseLocation(url))
     }
 
-    private func applyLimits(_ value: AppSettings) async throws {
-        let maximum = Int(Int32.max) / 1024
-        guard (0...maximum).contains(value.downloadLimitKB), (0...maximum).contains(value.uploadLimitKB) else {
-            throw ClientError.message("速度限制必须在 0 至 \(maximum) KiB/s 之间，0 表示不限速。")
-        }
-        try await engine.setLimits(download: value.downloadLimitKB * 1024, upload: value.uploadLimitKB * 1024)
-    }
     func updateSettings(_ value: AppSettings, completion: ((Bool) -> Void)? = nil) {
-        guard !stopping else { completion?(false); return }
+        guard !stopping, !savingSettings else { completion?(false); return }
+        savingSettings = true
         Task { [self] in
-          do {
-            guard value.downloadPath.hasPrefix("/") else { throw ClientError.message("请选择绝对路径作为下载目录。") }
-            try FileManager.default.createDirectory(atPath: value.downloadPath, withIntermediateDirectories: true)
-            try await applyLimits(value)
-            do { try JSONEncoder().encode(value).write(to: settingsURL, options: .atomic) }
-            catch { try? await applyLimits(settings); throw error }
-            let requestNotifications = value.notifyOnCompletion && !settings.notifyOnCompletion
-            settings = value
-            onChange?()
-            if requestNotifications { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) }
-            completion?(true)
-          } catch { completion?(false); present(error) }
+            defer { savingSettings = false }
+            do {
+                let next = try value.validated()
+                let previous = settings
+                let encoded = try JSONEncoder().encode(next)
+                try FileManager.default.createDirectory(atPath: next.downloadPath, withIntermediateDirectories: true)
+                try await engine.applySettings(next)
+                do {
+                    try encoded.write(to: settingsURL, options: .atomic)
+                } catch {
+                    let persistenceError = error
+                    do { try await engine.applySettings(previous) }
+                    catch {
+                        settings = next
+                        onChange?()
+                        throw ClientError.message("设置未能写入磁盘，且无法恢复之前的引擎配置。当前运行配置已改变，请重试保存。\n\(persistenceError.localizedDescription)\n\(error.localizedDescription)")
+                    }
+                    throw persistenceError
+                }
+                let requestNotifications = next.notifyOnCompletion && !previous.notifyOnCompletion
+                settings = next
+                onChange?()
+                if requestNotifications {
+                    _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+                }
+                completion?(true)
+            } catch { completion?(false); present(error) }
         }
     }
 
     func showFiles() {
         guard let torrent = selectedTorrent else { return }
-        let alert = NSAlert()
-        alert.messageText = "任务文件 · \(torrent.name)"
-        alert.informativeText = torrent.files.isEmpty ? "正在获取元数据。" : "选择文件并设置优先级；跳过的文件不会继续下载。"
-        alert.addButton(withTitle: "完成")
-        if !torrent.files.isEmpty { alert.addButton(withTitle: "应用优先级") }
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 220))
-        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 182, width: 520, height: 26))
-        picker.addItems(withTitles: torrent.files.map { $0.path })
-        let priority = NSPopUpButton(frame: NSRect(x: 0, y: 146, width: 200, height: 26))
-        priority.addItems(withTitles: ["跳过", "低", "正常", "高"])
-        priority.selectItem(at: 2)
-        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 130))
-        text.isEditable = false
-        text.string = torrent.files.map { "\(Int($0.progress * 100))%  \(ByteCountFormatter.string(fromByteCount: $0.size, countStyle: .file))  \($0.path)" }.joined(separator: "\n")
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 135))
-        scroll.hasVerticalScroller = true; scroll.documentView = text
-        container.addSubview(scroll); container.addSubview(picker); container.addSubview(priority)
-        alert.accessoryView = container
-        if alert.runModal() == .alertSecondButtonReturn, picker.indexOfSelectedItem >= 0 {
-            let file = torrent.files[picker.indexOfSelectedItem]
-            let value = [0, 1, 4, 7][priority.indexOfSelectedItem]
-            run { [self] in try await engine.setFilePriority(id: torrent.id, index: file.index, priority: value) }
-        }
+        onPresent?(.files(torrent))
     }
     func showTrackers() {
         guard let torrent = selectedTorrent else { return }
-        let alert = NSAlert()
-        alert.messageText = "Tracker · \(torrent.name)"
-        alert.informativeText = torrent.trackers.isEmpty ? "暂无 Tracker。" : torrent.trackers.map { "\($0.url)\n\($0.status)" }.joined(separator: "\n\n")
-        alert.runModal()
+        onPresent?(.trackers(torrent))
     }
     func present(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "CBittorrent"
-        alert.informativeText = error.localizedDescription
-        alert.alertStyle = .warning
-        alert.runModal()
+        onPresent?(.message(title: "CBittorrent", body: error.localizedDescription))
     }
     private func presentOnce(_ text: String) {
         guard shownErrors.insert(text).inserted else { return }

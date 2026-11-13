@@ -11,9 +11,9 @@ backend. The upstream sources remain in this repository as reference material.
 | --- | --- | --- |
 | `src/base/bittorrent/sessionimpl.cpp` | `Engine/CBTEngine.mm` | Session creation, active download/seed queues, rate limits, alerts and cumulative session counters |
 | `src/base/bittorrent/torrentimpl.cpp` | `Engine/CBTEngine.mm` | Add, explicit pause/resume, status, file priorities, remove and resume persistence |
-| `src/gui/addnewtorrentdialog.cpp` | `App/AppStore.swift` | Local torrent and magnet input, default destination, add-paused preference |
+| `src/gui/addnewtorrentdialog.cpp` | `App/AppStore.swift`, `App/UI/InWindowFlowView.swift` | In-window local torrent and magnet input, default destination, add-paused preference |
 | `src/gui/transferlistmodel.cpp` and `transferlistwidget.cpp` | `App/Models.swift`, `App/UI/MainWindowController.swift`, `TransferTable.swift` | Fixed-width list, state filters, search, selection and live metrics |
-| `src/gui/properties/propertieswidget.cpp` | `App/UI/InspectorView.swift`, `App/AppStore.swift` | Floating selected-task details, files/priorities, configured Tracker list |
+| `src/gui/properties/propertieswidget.cpp` | `App/UI/MainWindowController.swift`, `App/UI/InWindowFlowView.swift` | In-window task action menu, files/priorities, configured Tracker list; floating inspector removed in 0.3 |
 | `src/gui/optionsdialog.cpp` | `App/UI/SettingsView.swift` | Same-window download location, rate limits, close behavior and completion notifications |
 
 This table records behavior reimplemented around libtorrent. It does not claim
@@ -40,8 +40,8 @@ source task, save path and desired initial state.
 
 ## Remaining migration work
 
-- Advanced queue/ratio policies, per-task limits and categories/tags.
-- Rich peer and Tracker diagnostics, Tracker editing and connection settings.
+- Per-task limit overrides, scheduled alternative speeds and categories/tags.
+- Rich peer and Tracker diagnostics, Tracker editing and authenticated proxies.
 - RSS subscriptions, search plugins, Web UI and remote API.
 - qBittorrent settings and task import.
 - Developer ID signing, notarization and release updates.

@@ -4,21 +4,18 @@ import AppKit
 final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource,
                                   NSTableViewDelegate, NSSearchFieldDelegate {
     private let store: AppStore
-    private let surface = SurfaceView(frame: NSRect(x: 0, y: 0, width: 1000, height: 680), color: Titanium.panel)
-    private let toolbar = SurfaceView(frame: NSRect(x: 0, y: 32, width: 1000, height: 34), color: Titanium.panel)
-    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 66, width: 988, height: 587))
-    private let table = NSTableView()
+    private let surface = SurfaceView(frame: NSRect(x: 0, y: 0, width: 900, height: 600), color: Titanium.panel)
+    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 32, width: 888, height: 541))
+    private let table = StripedTransferTableView()
     private let search = NSSearchField()
     private let emptyLabel = Titanium.label("添加种子文件或磁力链接，开始第一次传输。", size: 13, color: Titanium.muted, alignment: .center)
-    private var filterButtons: [(TaskFilter, ActionButton)] = []
+    private let filterPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private var selectionButtons: [ActionButton] = []
-    private let transfersButton = ActionButton("传输", symbol: "square.stack")
     private let settingsButton = ActionButton("设置", symbol: "slider.horizontal.3")
-    private let inspectorButton = ActionButton("详情", symbol: "sidebar.right")
-    private var inspector: InspectorView!
     private var settingsView: SettingsView!
     private var showingSettings = false
-    private var inspectorVisible = true
+    private var flows: [InWindowFlowView] = []
+    private var flowTokens: [UUID] = []
     private var refreshingSelection = false
     private var torrents: [TorrentSnapshot] = []
     private var statusLabels: [NSTextField] = []
@@ -27,7 +24,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     init(store: AppStore) {
         self.store = store
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         super.init(window: window)
@@ -41,49 +38,77 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         window.hasShadow = true
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = surface
-        window.contentMinSize = NSSize(width: 1000, height: 680)
-        window.contentMaxSize = NSSize(width: 1000, height: 680)
+        window.contentMinSize = NSSize(width: 900, height: 600)
+        window.contentMaxSize = NSSize(width: 900, height: 600)
         window.delegate = self
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(type)?.isHidden = true
         }
         window.center()
         buildTitlebar()
-        buildToolbar()
         buildTable()
         buildStatusbar()
-        inspector = InspectorView(store: store) { [weak self] in self?.toggleInspector() }
-        inspector.frame = NSRect(x: 738, y: 74, width: 248, height: 571)
-        surface.addSubview(inspector)
         settingsView = SettingsView(store: store) { [weak self] in self?.showTransfers() }
-        settingsView.frame = NSRect(x: 0, y: 32, width: 1000, height: 621)
+        settingsView.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
         settingsView.isHidden = true
         surface.addSubview(settingsView)
+        store.onPresent = { [weak self] request in self?.present(request) }
         store.onChange = { [weak self] in self?.refresh() }
         refresh()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
+    private func clearFlows() {
+        flows.forEach { $0.removeFromSuperview() }
+        flows.removeAll()
+        flowTokens.removeAll()
+    }
+
+    func present(_ request: InWindowRequest) {
+        window?.makeFirstResponder(nil)
+        flows.last?.isHidden = true
+        let token = UUID()
+        let page = InWindowFlowView(request: request, store: store) { [weak self] in
+            guard let self, self.flowTokens.last == token else { return }
+            self.flowTokens.removeLast()
+            self.flows.popLast()?.removeFromSuperview()
+            if let previous = self.flows.last { previous.isHidden = false }
+            else if self.showingSettings { self.settingsView.isHidden = false }
+            else { self.scrollView.isHidden = false }
+            self.refresh()
+        }
+        page.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
+        flows.append(page)
+        flowTokens.append(token)
+        surface.addSubview(page)
+        settingsView.isHidden = true
+        scrollView.isHidden = true
+        emptyLabel.isHidden = true
+        selectionButtons.forEach { $0.isEnabled = false }
+        NSApp.unhide(nil)
+        window?.deminiaturize(nil)
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func showSettings() {
+        clearFlows()
         if !showingSettings { settingsView.reload() }
         showingSettings = true
         settingsView.isHidden = false
-        toolbar.isHidden = true
         scrollView.isHidden = true
         emptyLabel.isHidden = true
-        inspector.isHidden = true
-        transfersButton.active = false
         settingsButton.active = true
+        selectionButtons.forEach { $0.isEnabled = false }
     }
 
     func showTransfers() {
+        clearFlows()
         showingSettings = false
         settingsView.isHidden = true
-        toolbar.isHidden = false
         scrollView.isHidden = false
-        inspector.isHidden = !inspectorVisible
-        transfersButton.active = true
         settingsButton.active = false
         refresh()
     }
@@ -105,97 +130,91 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool { false }
 
     private func buildTitlebar() {
-        let titlebar = TitlebarView(frame: NSRect(x: 0, y: 0, width: 1000, height: 32), color: Titanium.chrome)
+        let titlebar = TitlebarView(frame: NSRect(x: 0, y: 0, width: 900, height: 32), color: Titanium.chrome)
         surface.addSubview(titlebar)
-        let capsule = SurfaceView(frame: NSRect(x: 12, y: 5, width: 54, height: 22), color: NSColor(hex: 0xE5E8ED), radius: 11)
-        titlebar.addSubview(capsule)
-        let close = ActionButton(symbol: "xmark", frame: NSRect(x: 1, y: 1, width: 26, height: 20)) { [weak self] in self?.window?.performClose(nil) }
-        close.tint = NSColor(hex: 0x9D707B)
-        close.hoverColor = NSColor(hex: 0xE8CED3)
-        close.layer?.cornerRadius = 10
-        close.toolTip = "关闭窗口"
-        close.setAccessibilityLabel("关闭窗口")
-        capsule.addSubview(close)
-        let minimize = ActionButton(symbol: "minus", frame: NSRect(x: 27, y: 1, width: 26, height: 20)) { [weak self] in self?.window?.miniaturize(nil) }
-        minimize.layer?.cornerRadius = 10
-        minimize.toolTip = "最小化"
-        minimize.setAccessibilityLabel("最小化")
-        capsule.addSubview(minimize)
-        let mark = SurfaceView(frame: NSRect(x: 79, y: 7, width: 18, height: 18), color: Titanium.accent, radius: 5)
-        let glyph = NSImageView(frame: NSRect(x: 3, y: 3, width: 12, height: 12))
-        glyph.image = NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil)
-        glyph.contentTintColor = .white
-        mark.addSubview(glyph)
+        titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 4, width: 50, height: 24)))
+        let mark = NSImageView(frame: NSRect(x: 78, y: 2, width: 28, height: 28))
+        if let iconURL = Bundle.main.url(forResource: "CBittorrent", withExtension: "icns") {
+            mark.image = NSImage(contentsOf: iconURL)
+        }
+        mark.setAccessibilityLabel("CBittorrent")
         titlebar.addSubview(mark)
-        let brand = Titanium.label("CBittorrent", size: 11)
-        brand.frame = NSRect(x: 103, y: 8, width: 140, height: 18)
-        titlebar.addSubview(brand)
-        transfersButton.frame = NSRect(x: 852, y: 5, width: 65, height: 22)
-        transfersButton.active = true
-        transfersButton.handler = { [weak self] in self?.showTransfers() }
-        titlebar.addSubview(transfersButton)
-        settingsButton.frame = NSRect(x: 922, y: 5, width: 65, height: 22)
+        buildTransferControls(in: titlebar)
+        settingsButton.frame = NSRect(x: 822, y: 5, width: 65, height: 22)
         settingsButton.handler = { [weak self] in self?.showSettings() }
         titlebar.addSubview(settingsButton)
     }
 
-    private func buildToolbar() {
-        surface.addSubview(toolbar)
-        var x: CGFloat = 13
-        for filter in TaskFilter.allCases {
-            let width: CGFloat = filter == .all ? 91 : 79
-            let button = ActionButton(filter.title, frame: NSRect(x: x, y: 5, width: width, height: 24)) { [weak self] in self?.store.setFilter(filter) }
-            button.font = Titanium.font(11)
-            toolbar.addSubview(button)
-            filterButtons.append((filter, button))
-            x += width + 3
-        }
-        x += 10
-        let add = ActionButton("添加", symbol: "plus", frame: NSRect(x: x, y: 5, width: 54, height: 24)) { [weak store] in store?.addTorrentPrompt() }
+    private func buildTransferControls(in titlebar: NSView) {
+        filterPicker.frame = NSRect(x: 120, y: 4, width: 128, height: 24)
+        filterPicker.font = Titanium.font(11)
+        filterPicker.controlSize = .small
+        filterPicker.isBordered = false
+        filterPicker.wantsLayer = true
+        filterPicker.layer?.cornerRadius = 6
+        filterPicker.layer?.backgroundColor = Titanium.panel.withAlphaComponent(0.65).cgColor
+        filterPicker.addItems(withTitles: TaskFilter.allCases.map(\.title))
+        filterPicker.target = self
+        filterPicker.action = #selector(filterChanged)
+        filterPicker.setAccessibilityLabel("任务状态筛选")
+        filterPicker.toolTip = "按任务状态筛选"
+        titlebar.addSubview(filterPicker)
+
+        search.cell = CenteredSearchCell(textCell: "")
+        search.isBezeled = true
+        search.bezelStyle = .roundedBezel
+        search.drawsBackground = true
+        search.isEditable = true
+        search.isSelectable = true
+        search.frame = NSRect(x: 258, y: 4, width: 324, height: 24)
+        search.placeholderString = "搜索任务"
+        search.font = Titanium.font(11)
+        search.focusRingType = .none
+        search.delegate = self
+        search.sendsSearchStringImmediately = true
+        search.setAccessibilityLabel("搜索任务")
+        titlebar.addSubview(search)
+
+        let add = ActionButton("添加", symbol: "plus", frame: NSRect(x: 592, y: 4, width: 60, height: 24)) { [weak store] in store?.addTorrentPrompt() }
         add.active = true
         add.toolTip = "添加种子文件或磁力链接 (⌘O)"
-        toolbar.addSubview(add)
-        x += 62
+        titlebar.addSubview(add)
+        var x: CGFloat = 661
         let actions: [(String, String, () -> Void)] = [
             ("play", "开始所选任务", { [weak store] in store?.startSelected() }),
             ("pause", "停止所选任务", { [weak store] in store?.pauseSelected() }),
             ("trash", "移除所选任务", { [weak store] in store?.removeSelected() })
         ]
         for (symbol, label, handler) in actions {
-            let button = ActionButton(symbol: symbol, frame: NSRect(x: x, y: 5, width: 27, height: 24), action: handler)
+            let button = ActionButton(symbol: symbol, frame: NSRect(x: x, y: 4, width: 27, height: 24), action: handler)
             button.toolTip = label
             button.setAccessibilityLabel(label)
-            toolbar.addSubview(button)
+            titlebar.addSubview(button)
             selectionButtons.append(button)
             x += 30
         }
-        let more = ActionButton(symbol: "ellipsis", frame: NSRect(x: x + 3, y: 5, width: 27, height: 24))
+        let more = ActionButton(symbol: "ellipsis", frame: NSRect(x: x, y: 4, width: 27, height: 24))
         more.toolTip = "更多任务操作"
         more.setAccessibilityLabel("更多任务操作")
         more.handler = { [weak self, weak more] in
             guard let self, let more else { return }
             self.showMore(from: more)
         }
-        toolbar.addSubview(more)
+        titlebar.addSubview(more)
         selectionButtons.append(more)
-        inspectorButton.frame = NSRect(x: 742, y: 5, width: 66, height: 24)
-        inspectorButton.active = true
-        inspectorButton.handler = { [weak self] in self?.toggleInspector() }
-        toolbar.addSubview(inspectorButton)
-        search.frame = NSRect(x: 818, y: 5, width: 169, height: 24)
-        search.placeholderString = "搜索任务"
-        search.font = Titanium.font(11)
-        search.focusRingType = .exterior
-        search.delegate = self
-        search.sendsSearchStringImmediately = true
-        search.setAccessibilityLabel("搜索任务")
-        toolbar.addSubview(search)
+    }
+
+    @objc private func filterChanged() {
+        guard TaskFilter.allCases.indices.contains(filterPicker.indexOfSelectedItem) else { return }
+        let filter = TaskFilter.allCases[filterPicker.indexOfSelectedItem]
+        showTransfers()
+        store.setFilter(filter)
     }
 
     private func buildTable() {
         table.backgroundColor = Titanium.panel
-        table.headerView = QuietHeaderView(frame: NSRect(x: 0, y: 0, width: 986, height: 29))
-        table.rowHeight = 35
+        table.headerView = QuietHeaderView(frame: NSRect(x: 0, y: 0, width: 886, height: 25))
+        table.rowHeight = 24
         table.intercellSpacing = .zero
         table.gridStyleMask = []
         table.usesAlternatingRowBackgroundColors = false
@@ -211,7 +230,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         table.target = self
         table.doubleAction = #selector(revealSelection)
         let titles = ["名称", "进度", "状态", "剩余时间", "↓ 下载 /s", "↑ 上传 /s", "分享率", "大小"]
-        let widths: [CGFloat] = [270, 116, 80, 110, 105, 105, 80, 120]
+        let widths: [CGFloat] = [230, 106, 72, 98, 94, 94, 74, 118]
         for (index, title) in titles.enumerated() {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(String(index)))
             column.width = widths[index]
@@ -222,7 +241,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             column.headerCell.alignment = index >= 3 ? .right : .left
             table.addTableColumn(column)
         }
-        table.frame = NSRect(x: 0, y: 0, width: 986, height: 558)
+        table.frame = NSRect(x: 0, y: 0, width: 886, height: 516)
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -232,14 +251,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         scrollView.backgroundColor = Titanium.panel
         scrollView.documentView = table
         surface.addSubview(scrollView)
-        emptyLabel.frame = NSRect(x: 50, y: 282, width: 650, height: 26)
+        emptyLabel.frame = NSRect(x: 30, y: 285, width: 840, height: 26)
         surface.addSubview(emptyLabel)
     }
 
     private func buildStatusbar() {
-        let statusbar = SurfaceView(frame: NSRect(x: 0, y: 653, width: 1000, height: 27), color: Titanium.chrome)
+        let statusbar = SurfaceView(frame: NSRect(x: 0, y: 573, width: 900, height: 27), color: Titanium.chrome)
         surface.addSubview(statusbar)
-        let widths: [CGFloat] = [190, 116, 109, 109, 210, 110, 130]
+        let widths: [CGFloat] = [120, 90, 100, 100, 220, 90, 154]
         var x: CGFloat = 13
         for width in widths {
             let label = Titanium.label(size: 10, color: Titanium.muted)
@@ -248,12 +267,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             statusLabels.append(label)
             x += width
         }
-    }
-
-    private func toggleInspector() {
-        inspectorVisible.toggle()
-        inspector.isHidden = !inspectorVisible || showingSettings
-        inspectorButton.active = inspectorVisible
     }
 
     private func count(_ filter: TaskFilter) -> Int {
@@ -271,11 +284,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func refresh() {
         let previousIDs = torrents.map(\.id)
         torrents = store.filteredTorrents
-        for (filter, button) in filterButtons {
-            button.setTitle("\(filter.title) \(count(filter))")
-            button.active = store.filter == filter
+        for (index, filter) in TaskFilter.allCases.enumerated() {
+            filterPicker.item(at: index)?.title = "\(filter.title) · \(count(filter))"
         }
-        selectionButtons.forEach { $0.isEnabled = !store.selectedIDs.isEmpty }
+        if let index = TaskFilter.allCases.firstIndex(of: store.filter) { filterPicker.selectItem(at: index) }
+        selectionButtons.forEach { $0.isEnabled = !showingSettings && flows.isEmpty && !store.selectedIDs.isEmpty }
         if previousIDs != torrents.map(\.id) {
             refreshingSelection = true
             table.reloadData()
@@ -298,16 +311,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             table.selectRowIndexes(indexes, byExtendingSelection: false)
             refreshingSelection = false
         }
-        emptyLabel.isHidden = showingSettings || !torrents.isEmpty
+        emptyLabel.isHidden = showingSettings || !flows.isEmpty || !torrents.isEmpty
         emptyLabel.stringValue = store.snapshot.torrents.isEmpty
             ? "添加种子文件或磁力链接，开始第一次传输。" : "没有匹配的任务"
-        inspector.update(store.selectedTorrent)
         updateStatus()
     }
 
     private func updateStatus() {
         let snapshot = store.snapshot
-        let selectedFileCount = snapshot.torrents.filter { store.selectedIDs.contains($0.id) }.reduce(0) { $0 + $1.files.count }
+        let connections = snapshot.torrents.reduce(0) { $0 + $1.peers }
         if Date().timeIntervalSince(lastDiskCheck) > 15 {
             lastDiskCheck = Date()
             if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: store.settings.downloadPath),
@@ -316,8 +328,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             } else { diskStatus = "磁盘空间不可用" }
         }
         let values = [
-            "\(torrents.count) 个任务 · 选中 \(table.selectedRowIndexes.count) · \(selectedFileCount) 文件",
             "\(count(.downloading)) 下载 · \(count(.seeding)) 做种",
+            "连接 \(connections)",
             "↓ \(Titanium.bytes(snapshot.downloadRate))/s",
             "↑ \(Titanium.bytes(snapshot.uploadRate))/s",
             "会话 ↓ \(Titanium.bytes(snapshot.totalDownloaded)) ↑ \(Titanium.bytes(snapshot.totalUploaded))",
@@ -327,6 +339,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             label.stringValue = value
             label.toolTip = value
         }
+        statusLabels[1].toolTip = "当前所有任务的已连接 Peer 总数：\(connections)"
         statusLabels[4].toolTip = "本次会话：下载 \(Titanium.bytes(snapshot.totalDownloaded)) · 上传 \(Titanium.bytes(snapshot.totalUploaded))"
         statusLabels[5].toolTip = "DHT 节点：\(snapshot.dhtNodes) · 监听端口：\(snapshot.listenPort)"
         if let error = snapshot.errors.last {
@@ -338,7 +351,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     func numberOfRows(in tableView: NSTableView) -> Int { torrents.count }
 
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { TransferRowView() }
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = TransferRowView()
+        view.alternate = row % 2 == 1
+        return view
+    }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let tableColumn, row < torrents.count, let column = Int(tableColumn.identifier.rawValue) else { return nil }
@@ -388,12 +405,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     func controlTextDidChange(_ obj: Notification) {
         guard obj.object as? NSSearchField === search else { return }
+        if showingSettings || !flows.isEmpty { showTransfers() }
         store.setSearch(search.stringValue)
     }
 
     private func showMore(from button: NSView) {
         let menu = NSMenu()
-        for (title, action) in [("在访达中显示", #selector(revealSelection)),
+        for (title, action) in [("打开保存位置", #selector(revealSelection)),
                                 ("查看文件", #selector(showFiles)), ("查看 Tracker", #selector(showTrackers))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self

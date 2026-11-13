@@ -69,14 +69,6 @@ enum TaskFilter: String, CaseIterable {
     }
 }
 
-struct AppSettings: Codable, Equatable {
-    var downloadPath = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!.path
-    var downloadLimitKB = 0
-    var uploadLimitKB = 0
-    var closeKeepsTransfers = true
-    var notifyOnCompletion = false
-    var addPaused = false
-}
 
 enum ClientError: LocalizedError {
     case message(String)

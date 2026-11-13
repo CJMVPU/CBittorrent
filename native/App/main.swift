@@ -6,6 +6,8 @@ import Darwin
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private var store: AppStore?
     private var controller: MainWindowController?
+    private var statusBar: StatusBarController?
+    private var startupController: StartupFailureController?
     private var lockDescriptor: Int32 = -1
     private var pendingSources: [String] = []
     private var terminating = false
@@ -30,15 +32,19 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             let store = try AppStore(profile: profile)
             self.store = store
             controller = MainWindowController(store: store)
+            statusBar = StatusBarController(store: store,
+                showWindow: { [weak self] in self?.transfers() },
+                showSettings: { [weak self] in self?.settings() })
             configureMenus()
             controller?.showWindow(nil)
             NSApp.activate(ignoringOtherApps: true)
             store.start()
             if !pendingSources.isEmpty { store.add(sources: pendingSources); pendingSources.removeAll() }
         } catch {
-            let alert = NSAlert(error: error)
-            alert.runModal()
-            NSApp.terminate(nil)
+            startupController = StartupFailureController(error: error)
+            configureMenus()
+            startupController?.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
@@ -73,10 +79,18 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = menu
     }
     @objc private func add() { store?.addTorrentPrompt() }
-    @objc private func settings() { controller?.showSettings(); controller?.showWindow(nil) }
-    @objc private func transfers() { controller?.showTransfers(); controller?.showWindow(nil) }
+    private func revealWindow() {
+        NSApp.unhide(nil)
+        let activeController: NSWindowController? = controller ?? startupController
+        activeController?.window?.deminiaturize(nil)
+        activeController?.showWindow(nil)
+        activeController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    @objc private func settings() { controller?.showSettings(); revealWindow() }
+    @objc private func transfers() { controller?.showTransfers(); revealWindow() }
     @objc private func about() {
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "CBittorrent", .applicationVersion: "0.1.0", .credits: NSAttributedString(string: "Native macOS client powered by libtorrent.\nBased on qBittorrent business concepts; GPL-2.0-or-later.")])
+        controller?.present(.about)
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         let sources = urls.compactMap { url -> String? in
@@ -84,11 +98,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             if url.isFileURL && url.pathExtension.lowercased() == "torrent" { return url.path }
             return nil
         }
-        if let store { store.add(sources: sources); controller?.showWindow(nil) }
+        if let store { store.add(sources: sources); revealWindow() }
         else { pendingSources += sources }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        controller?.showWindow(nil)
+        revealWindow()
         return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

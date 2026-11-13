@@ -8,9 +8,11 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>CBittorrent</string>
     <key>CFBundleDisplayName</key><string>CBittorrent</string>
+    <key>CFBundleIconFile</key><string>CBittorrent.icns</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.4.1</string>
+    <key>CFBundleVersion</key><string>8</string>
     <key>LSMinimumSystemVersion</key><string>27.0</string>
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>
     <key>LSRequiresNativeExecution</key><true/>

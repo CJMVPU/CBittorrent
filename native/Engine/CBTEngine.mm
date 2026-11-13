@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -112,10 +114,128 @@ namespace
         }
     }
 
+    NSDictionary *defaultConfiguration()
+    {
+        return @{@"downloadLimitKB": @0, @"uploadLimitKB": @0, @"listenPort": @0,
+            @"enableUPnP": @YES, @"enableNATPMP": @YES, @"enableDHT": @YES, @"enablePeX": @YES, @"enableLSD": @YES,
+            @"transportMode": @0, @"encryptionMode": @0, @"maxConnections": @200,
+            @"maxConnectionsPerTorrent": @100, @"uploadSlots": @8, @"queueEnabled": @YES,
+            @"maxActiveDownloads": @3, @"maxActiveUploads": @5, @"maxActiveTorrents": @8,
+            @"seedRatioLimit": @0, @"seedTimeLimitMinutes": @0,
+            @"sequentialDownloads": @NO, @"preallocateFiles": @NO,
+            @"proxyType": @0, @"proxyHost": @"", @"proxyPort": @1080,
+            @"proxyPeers": @YES, @"proxyTrackers": @YES,
+            @"autoAddTrackers": @NO, @"defaultTrackers": @""};
+    }
+
+    int integerSetting(NSDictionary *values, NSString *key, int minimum, int maximum)
+    {
+        id value = values[key];
+        if (![value isKindOfClass:[NSNumber class]] || CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID())
+            throw std::invalid_argument(std::string(key.UTF8String) + " must be an integer");
+        const double number = [value doubleValue];
+        if (!std::isfinite(number) || std::floor(number) != number || number < minimum || number > maximum)
+            throw std::invalid_argument(std::string(key.UTF8String) + " is out of range");
+        return static_cast<int>(number);
+    }
+
+    bool booleanSetting(NSDictionary *values, NSString *key)
+    {
+        id value = values[key];
+        if (![value isKindOfClass:[NSNumber class]] || CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID())
+            throw std::invalid_argument(std::string(key.UTF8String) + " must be true or false");
+        return [value boolValue];
+    }
+
+    NSDictionary *validatedConfiguration(NSDictionary *current, const char *json)
+    {
+        const std::string input = requiredString(json, "Settings JSON");
+        NSData *data = [NSData dataWithBytes:input.data() length:input.size()];
+        NSError *error = nil;
+        id decoded = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+        if (![decoded isKindOfClass:[NSDictionary class]])
+            throw std::invalid_argument("Settings must be a JSON object");
+        NSMutableDictionary *result = [current mutableCopy];
+        // App-only preferences may share the payload; only engine keys cross this boundary.
+        for (NSString *key in current)
+        {
+            if (decoded[key] != nil)
+                result[key] = decoded[key];
+        }
+        for (NSString *key in @[@"enableUPnP", @"enableNATPMP", @"enableDHT", @"enablePeX", @"enableLSD",
+            @"queueEnabled", @"sequentialDownloads", @"preallocateFiles", @"proxyPeers", @"proxyTrackers", @"autoAddTrackers"])
+            booleanSetting(result, key);
+        integerSetting(result, @"downloadLimitKB", 0, std::numeric_limits<int>::max() / 1024);
+        integerSetting(result, @"uploadLimitKB", 0, std::numeric_limits<int>::max() / 1024);
+        integerSetting(result, @"listenPort", 0, 65535);
+        integerSetting(result, @"transportMode", 0, 2);
+        integerSetting(result, @"encryptionMode", 0, 2);
+        for (NSString *key in @[@"maxConnections", @"maxConnectionsPerTorrent"])
+        {
+            if (integerSetting(result, key, 0, std::numeric_limits<int>::max()) == 1)
+                throw std::invalid_argument(std::string(key.UTF8String) + " must be zero or at least two");
+        }
+        integerSetting(result, @"uploadSlots", 0, std::numeric_limits<int>::max());
+        for (NSString *key in @[@"maxActiveDownloads", @"maxActiveUploads", @"maxActiveTorrents"])
+            integerSetting(result, key, 1, std::numeric_limits<int>::max());
+        integerSetting(result, @"seedTimeLimitMinutes", 0, std::numeric_limits<int>::max() / 60);
+        id ratio = result[@"seedRatioLimit"];
+        if (![ratio isKindOfClass:[NSNumber class]] || CFGetTypeID((__bridge CFTypeRef)ratio) == CFBooleanGetTypeID()
+            || !std::isfinite([ratio doubleValue]) || [ratio doubleValue] < 0 || [ratio doubleValue] > 10000)
+            throw std::invalid_argument("seedRatioLimit must be between zero and 10000");
+        const int proxyType = integerSetting(result, @"proxyType", 0, 2);
+        integerSetting(result, @"proxyPort", proxyType ? 1 : 0, 65535);
+        id host = result[@"proxyHost"];
+        if (![host isKindOfClass:[NSString class]])
+            throw std::invalid_argument("proxyHost must be text");
+        NSString *trimmed = [host stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (proxyType && (trimmed.length == 0 || [trimmed rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location != NSNotFound
+            || [trimmed containsString:@"://"] || [trimmed containsString:@"/"]
+            || [trimmed rangeOfString:[NSString stringWithFormat:@"%C", (unichar)0]].location != NSNotFound))
+            throw std::invalid_argument("Proxy host must be a hostname or IP address without a URL scheme or path");
+        result[@"proxyHost"] = trimmed;
+        id trackerText = result[@"defaultTrackers"];
+        if (![trackerText isKindOfClass:[NSString class]])
+            throw std::invalid_argument("defaultTrackers must be text");
+        NSMutableArray<NSString *> *trackers = [NSMutableArray array];
+        NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        NSMutableCharacterSet *forbidden = [[NSCharacterSet whitespaceAndNewlineCharacterSet] mutableCopy];
+        [forbidden formUnionWithCharacterSet:[NSCharacterSet controlCharacterSet]];
+        for (NSString *line in [trackerText componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]])
+        {
+            NSString *tracker = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (tracker.length == 0)
+                continue;
+            NSURLComponents *url = [NSURLComponents componentsWithString:tracker];
+            if ([tracker rangeOfCharacterFromSet:forbidden].location != NSNotFound || !url.URL || !url.host.length
+                || ![@[@"http", @"https", @"udp"] containsObject:url.scheme.lowercaseString]
+                || (url.port && (url.port.integerValue < 1 || url.port.integerValue > 65535)))
+                throw std::invalid_argument("Tracker URLs must use http, https or udp with a host and valid port");
+            if (![seen containsObject:tracker])
+            {
+                [seen addObject:tracker];
+                [trackers addObject:tracker];
+            }
+        }
+        result[@"defaultTrackers"] = [trackers componentsJoinedByString:@"\n"];
+        return [result copy];
+    }
+
+    std::vector<std::string> defaultTrackers(NSDictionary *configuration)
+    {
+        std::vector<std::string> result;
+        for (NSString *url in [configuration[@"defaultTrackers"] componentsSeparatedByString:@"\n"])
+        {
+            if (url.length)
+                result.emplace_back(url.UTF8String);
+        }
+        return result;
+    }
+
     lt::settings_pack initialSettings()
     {
         lt::settings_pack settings;
-        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.1.0");
+        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.4.1");
         settings.set_int(lt::settings_pack::alert_mask,
             static_cast<std::uint32_t>(lt::alert_category::error | lt::alert_category::storage | lt::alert_category::status));
         settings.set_int(lt::settings_pack::active_downloads, 3);
@@ -137,6 +257,54 @@ namespace
         return settings;
     }
 
+    lt::settings_pack configurationSettings(NSDictionary *next)
+    {
+        lt::settings_pack settings = initialSettings();
+        const bool local = std::getenv("CBT_ENGINE_LOCAL_ONLY") != nullptr;
+        const int port = [next[@"listenPort"] intValue];
+        settings.set_str(lt::settings_pack::listen_interfaces, local ? "127.0.0.1:0"
+            : "0.0.0.0:" + std::to_string(port) + ",[::]:" + std::to_string(port));
+        settings.set_bool(lt::settings_pack::enable_upnp, !local && [next[@"enableUPnP"] boolValue]);
+        settings.set_bool(lt::settings_pack::enable_natpmp, !local && [next[@"enableNATPMP"] boolValue]);
+        settings.set_bool(lt::settings_pack::enable_dht, !local && [next[@"enableDHT"] boolValue]);
+        settings.set_bool(lt::settings_pack::enable_lsd, !local && [next[@"enableLSD"] boolValue]);
+        const int transport = [next[@"transportMode"] intValue];
+        settings.set_bool(lt::settings_pack::enable_incoming_tcp, transport != 2);
+        settings.set_bool(lt::settings_pack::enable_outgoing_tcp, transport != 2);
+        settings.set_bool(lt::settings_pack::enable_incoming_utp, transport != 1);
+        settings.set_bool(lt::settings_pack::enable_outgoing_utp, transport != 1);
+        const int encryption = [next[@"encryptionMode"] intValue];
+        const int policy = encryption == 1 ? lt::settings_pack::pe_forced : encryption == 2 ? lt::settings_pack::pe_disabled : lt::settings_pack::pe_enabled;
+        settings.set_int(lt::settings_pack::in_enc_policy, policy);
+        settings.set_int(lt::settings_pack::out_enc_policy, policy);
+        settings.set_int(lt::settings_pack::allowed_enc_level, encryption == 1 ? lt::settings_pack::pe_rc4 : lt::settings_pack::pe_both);
+        settings.set_bool(lt::settings_pack::prefer_rc4, encryption != 2);
+        settings.set_int(lt::settings_pack::download_rate_limit, [next[@"downloadLimitKB"] intValue] * 1024);
+        settings.set_int(lt::settings_pack::upload_rate_limit, [next[@"uploadLimitKB"] intValue] * 1024);
+        const int connections = [next[@"maxConnections"] intValue];
+        settings.set_int(lt::settings_pack::connections_limit, connections == 0 ? std::numeric_limits<int>::max() : connections);
+        const int slots = [next[@"uploadSlots"] intValue];
+        settings.set_int(lt::settings_pack::unchoke_slots_limit, slots == 0 ? -1 : slots);
+        settings.set_int(lt::settings_pack::choking_algorithm, lt::settings_pack::fixed_slots_choker);
+        const bool queue = [next[@"queueEnabled"] boolValue];
+        settings.set_int(lt::settings_pack::active_downloads, queue ? [next[@"maxActiveDownloads"] intValue] : -1);
+        settings.set_int(lt::settings_pack::active_seeds, queue ? [next[@"maxActiveUploads"] intValue] : -1);
+        settings.set_int(lt::settings_pack::active_limit, queue ? [next[@"maxActiveTorrents"] intValue] : -1);
+        // Our explicit pause policy persists the stop decision. Disable libtorrent's
+        // implicit seed queue limits so its defaults cannot silently stop tasks sooner.
+        settings.set_int(lt::settings_pack::share_ratio_limit, std::numeric_limits<int>::max());
+        settings.set_int(lt::settings_pack::seed_time_ratio_limit, std::numeric_limits<int>::max());
+        settings.set_int(lt::settings_pack::seed_time_limit, std::numeric_limits<int>::max());
+        const int proxy = local ? 0 : [next[@"proxyType"] intValue];
+        settings.set_int(lt::settings_pack::proxy_type, proxy == 1 ? lt::settings_pack::socks5 : proxy == 2 ? lt::settings_pack::http : lt::settings_pack::none);
+        settings.set_str(lt::settings_pack::proxy_hostname, proxy ? std::string([next[@"proxyHost"] UTF8String]) : "");
+        settings.set_int(lt::settings_pack::proxy_port, [next[@"proxyPort"] intValue]);
+        settings.set_bool(lt::settings_pack::proxy_peer_connections, proxy && [next[@"proxyPeers"] boolValue]);
+        settings.set_bool(lt::settings_pack::proxy_tracker_connections, proxy && [next[@"proxyTrackers"] boolValue]);
+        settings.set_bool(lt::settings_pack::proxy_hostnames, proxy != 0);
+        return settings;
+    }
+
     std::string stateName(const lt::torrent_status &status)
     {
         if (status.errc)
@@ -155,15 +323,18 @@ namespace
 
 struct CBTEngine
 {
-    explicit CBTEngine(const fs::path &profile)
+    CBTEngine(const fs::path &profile, NSDictionary *configured)
         : profilePath {profile}
         , resumePath {profile / "ResumeData"}
-        , session {initialSettings()}
+        , session {configurationSettings(configured)}
+        , configuration {configured}
     {
         fs::create_directories(resumePath);
         ::chmod(profilePath.c_str(), 0700);
         ::chmod(resumePath.c_str(), 0700);
         restore();
+        for (const lt::torrent_handle &handle : session.get_torrents())
+            configureTorrent(handle);
     }
 
     lt::torrent_handle find(const char *id)
@@ -214,6 +385,18 @@ struct CBTEngine
                 if (params.save_path.empty())
                     throw std::runtime_error("Resume data has no save path");
                 params.flags |= lt::torrent_flags::duplicate_is_error;
+                // Apply per-task policy before adding the handle: restored peers must
+                // not briefly use an old PeX or connection configuration.
+                params.flags &= ~(lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download);
+                if (![configuration[@"enablePeX"] boolValue])
+                    params.flags |= lt::torrent_flags::disable_pex;
+                if ([configuration[@"sequentialDownloads"] boolValue])
+                    params.flags |= lt::torrent_flags::sequential_download;
+                params.max_connections = [configuration[@"maxConnectionsPerTorrent"] intValue];
+                if (params.max_connections == 0)
+                    params.max_connections = -1;
+                if (![configuration[@"queueEnabled"] boolValue] && (params.flags & lt::torrent_flags::auto_managed))
+                    params.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
                 const lt::torrent_handle handle = session.add_torrent(std::move(params), error);
                 if (error)
                     throw std::runtime_error(error.message());
@@ -222,6 +405,68 @@ struct CBTEngine
             catch (const std::exception &error)
             {
                 report("Could not restore " + entry.path().filename().string() + ": " + error.what());
+            }
+        }
+    }
+
+    void configureTorrent(const lt::torrent_handle &handle)
+    {
+        const lt::torrent_status status = handle.status();
+        const bool queue = [configuration[@"queueEnabled"] boolValue];
+        if (!queue && (status.flags & lt::torrent_flags::auto_managed))
+        {
+            handle.unset_flags(lt::torrent_flags::auto_managed);
+            handle.resume();
+        }
+        else if (queue && !(status.flags & lt::torrent_flags::paused))
+        {
+            handle.set_flags(lt::torrent_flags::auto_managed);
+        }
+        // A manually paused task stays paused when unrelated settings change.
+        const auto mask = lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download;
+        lt::torrent_flags_t flags;
+        if (![configuration[@"enablePeX"] boolValue])
+            flags |= lt::torrent_flags::disable_pex;
+        if ([configuration[@"sequentialDownloads"] boolValue])
+            flags |= lt::torrent_flags::sequential_download;
+        handle.set_flags(flags, mask);
+        const int connections = [configuration[@"maxConnectionsPerTorrent"] intValue];
+        handle.set_max_connections(connections == 0 ? -1 : connections);
+    }
+
+    void applyConfiguration(NSDictionary *next)
+    {
+        const lt::settings_pack settings = configurationSettings(next);
+        session.apply_settings(settings);
+        configuration = next;
+        for (const lt::torrent_handle &handle : session.get_torrents())
+        {
+            configureTorrent(handle);
+            requestSave(handle);
+        }
+        enforceSeedLimits();
+    }
+
+    void enforceSeedLimits()
+    {
+        const double ratioLimit = [configuration[@"seedRatioLimit"] doubleValue];
+        const int timeLimit = [configuration[@"seedTimeLimitMinutes"] intValue];
+        if (ratioLimit == 0 && timeLimit == 0)
+            return;
+        for (const lt::torrent_handle &handle : session.get_torrents())
+        {
+            const lt::torrent_status status = handle.status();
+            if (!status.is_finished || (status.flags & lt::torrent_flags::paused))
+                continue;
+            const int64_t denominator = status.all_time_download > 0 ? status.all_time_download : status.total_wanted;
+            const bool ratioReached = ratioLimit > 0 && denominator > 0
+                && static_cast<double>(status.all_time_upload) / denominator >= ratioLimit;
+            const bool timeReached = timeLimit > 0 && status.finished_duration.count() >= static_cast<int64_t>(timeLimit) * 60;
+            if (ratioReached || timeReached)
+            {
+                handle.unset_flags(lt::torrent_flags::auto_managed);
+                handle.pause();
+                requestSave(handle);
             }
         }
     }
@@ -285,6 +530,7 @@ struct CBTEngine
                 report(failure->message());
             }
         }
+        enforceSeedLimits();
     }
 
     void requestSave(const lt::torrent_handle &handle)
@@ -328,6 +574,7 @@ struct CBTEngine
     fs::path profilePath;
     fs::path resumePath;
     lt::session session;
+    NSDictionary *configuration;
     std::set<lt::torrent_handle> pendingSaves;
     std::map<lt::torrent_handle, std::string> torrentIDs;
     std::set<lt::torrent_handle> removedHandles;
@@ -367,22 +614,32 @@ namespace
 
 CBTEngine *cbt_engine_create(const char *profilePath, char **error)
 {
-    if (error)
-        *error = nullptr;
-    try
-    {
-        const fs::path path = fs::absolute(requiredString(profilePath, "Profile path"));
-        // A bundled OpenSSL must not depend on the build machine's Homebrew CA path.
-        // Keep an explicit user override and retain normal certificate verification.
-        if (!std::getenv("SSL_CERT_FILE") && fs::is_regular_file("/etc/ssl/cert.pem"))
-            ::setenv("SSL_CERT_FILE", "/etc/ssl/cert.pem", 0);
-        return new CBTEngine(path);
-    }
-    catch (const std::exception &failure)
+    return cbt_engine_create_configured(profilePath, "{}", error);
+}
+
+CBTEngine *cbt_engine_create_configured(const char *profilePath, const char *settingsJSON, char **error)
+{
+    @autoreleasepool
     {
         if (error)
-            *error = copyString(failure.what());
-        return nullptr;
+            *error = nullptr;
+        try
+        {
+            const fs::path path = fs::absolute(requiredString(profilePath, "Profile path"));
+            NSDictionary *configured = validatedConfiguration(defaultConfiguration(), settingsJSON);
+            // A bundled OpenSSL must not depend on the build machine's Homebrew CA path.
+            // Keep an explicit user override and retain normal certificate verification.
+            if (!std::getenv("SSL_CERT_FILE") && fs::is_regular_file("/etc/ssl/cert.pem"))
+                ::setenv("SSL_CERT_FILE", "/etc/ssl/cert.pem", 0);
+            // Configure the session before it can create network sockets or restore tasks.
+            return new CBTEngine(path, configured);
+        }
+        catch (const std::exception &failure)
+        {
+            if (error)
+                *error = copyString(failure.what());
+            return nullptr;
+        }
     }
 }
 
@@ -426,7 +683,8 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
                 const lt::torrent_status status = handle.status();
                 const int64_t remaining = std::max<int64_t>(0, status.total_wanted - status.total_wanted_done);
                 const int64_t eta = status.is_finished ? 0 : (status.download_payload_rate > 0 ? remaining / status.download_payload_rate : -1);
-                const double ratio = status.all_time_download > 0 ? static_cast<double>(status.all_time_upload) / status.all_time_download : 0;
+                const int64_t ratioBytes = status.all_time_download > 0 ? status.all_time_download : status.total_wanted;
+                const double ratio = ratioBytes > 0 ? static_cast<double>(status.all_time_upload) / ratioBytes : 0;
                 NSMutableArray *files = [NSMutableArray array];
                 if (const std::shared_ptr<const lt::torrent_info> info = handle.torrent_file())
                 {
@@ -496,8 +754,31 @@ int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, 
             params = lt::load_torrent_file(input);
         if (failure)
             throw std::runtime_error(failure.message());
+        if ([state.configuration[@"autoAddTrackers"] boolValue])
+        {
+            std::set<std::string> existing(params.trackers.begin(), params.trackers.end());
+            params.tracker_tiers.resize(params.trackers.size(), 0);
+            for (const std::string &url : defaultTrackers(state.configuration))
+            {
+                if (existing.insert(url).second)
+                {
+                    params.trackers.push_back(url);
+                    params.tracker_tiers.push_back(0);
+                }
+            }
+        }
         params.save_path = destination.string();
         params.flags |= lt::torrent_flags::duplicate_is_error;
+        params.storage_mode = [state.configuration[@"preallocateFiles"] boolValue] ? lt::storage_mode_allocate : lt::storage_mode_sparse;
+        if (![state.configuration[@"enablePeX"] boolValue])
+            params.flags |= lt::torrent_flags::disable_pex;
+        if ([state.configuration[@"sequentialDownloads"] boolValue])
+            params.flags |= lt::torrent_flags::sequential_download;
+        params.max_connections = [state.configuration[@"maxConnectionsPerTorrent"] intValue];
+        if (params.max_connections == 0)
+            params.max_connections = -1;
+        if (![state.configuration[@"queueEnabled"] boolValue])
+            params.flags &= ~lt::torrent_flags::auto_managed;
         if (paused)
         {
             params.flags |= lt::torrent_flags::paused;
@@ -532,7 +813,10 @@ int cbt_engine_resume(CBTEngine *engine, const char *torrentID, char **error)
     {
         lt::torrent_handle handle = state.find(torrentID);
         handle.clear_error();
-        handle.set_flags(lt::torrent_flags::auto_managed);
+        if ([state.configuration[@"queueEnabled"] boolValue])
+            handle.set_flags(lt::torrent_flags::auto_managed);
+        else
+            handle.unset_flags(lt::torrent_flags::auto_managed);
         handle.resume();
         state.requestSave(handle);
     });
@@ -563,6 +847,97 @@ int cbt_engine_set_limits(CBTEngine *engine, int downloadBytesPerSecond, int upl
         settings.set_int(lt::settings_pack::upload_rate_limit, uploadBytesPerSecond);
         state.session.apply_settings(settings);
     });
+}
+
+int cbt_engine_apply_settings(CBTEngine *engine, const char *json, char **error)
+{
+    @autoreleasepool
+    {
+        return perform(engine, error, [&](CBTEngine &state)
+        {
+            // Validate every supplied field before changing any live setting.
+            NSDictionary *next = validatedConfiguration(state.configuration, json);
+            state.applyConfiguration(next);
+        });
+    }
+}
+
+int cbt_engine_apply_default_trackers(CBTEngine *engine, int *changedCount, char **error)
+{
+    if (changedCount)
+        *changedCount = 0;
+    return perform(engine, error, [&](CBTEngine &state)
+    {
+        const auto configured = defaultTrackers(state.configuration);
+        int changed = 0;
+        for (const lt::torrent_handle &handle : state.session.get_torrents())
+        {
+            std::set<std::string> existing;
+            for (const auto &tracker : handle.trackers())
+                existing.insert(tracker.url);
+            bool added = false;
+            for (const std::string &url : configured)
+            {
+                if (existing.insert(url).second)
+                {
+                    handle.add_tracker(lt::announce_entry(url));
+                    added = true;
+                }
+            }
+            if (added)
+            {
+                ++changed;
+                state.requestSave(handle);
+            }
+        }
+        if (changedCount)
+            *changedCount = changed;
+    });
+}
+
+char *cbt_engine_settings_json(CBTEngine *engine)
+{
+    @autoreleasepool
+    {
+        if (!engine)
+            return nullptr;
+        const std::lock_guard<std::mutex> lock(engine->mutex);
+        const lt::settings_pack effective = engine->session.get_settings();
+        NSMutableDictionary *result = [engine->configuration mutableCopy];
+        result[@"effective"] = @{
+            @"downloadRateLimit": @(effective.get_int(lt::settings_pack::download_rate_limit)),
+            @"uploadRateLimit": @(effective.get_int(lt::settings_pack::upload_rate_limit)),
+            @"connectionsLimit": @(effective.get_int(lt::settings_pack::connections_limit)),
+            @"uploadSlots": @(effective.get_int(lt::settings_pack::unchoke_slots_limit)),
+            @"activeDownloads": @(effective.get_int(lt::settings_pack::active_downloads)),
+            @"activeSeeds": @(effective.get_int(lt::settings_pack::active_seeds)),
+            @"activeTorrents": @(effective.get_int(lt::settings_pack::active_limit)),
+            @"enableDHT": @(effective.get_bool(lt::settings_pack::enable_dht)),
+            @"enableLSD": @(effective.get_bool(lt::settings_pack::enable_lsd)),
+            @"enableUPnP": @(effective.get_bool(lt::settings_pack::enable_upnp)),
+            @"enableNATPMP": @(effective.get_bool(lt::settings_pack::enable_natpmp)),
+            @"incomingTCP": @(effective.get_bool(lt::settings_pack::enable_incoming_tcp)),
+            @"incomingUTP": @(effective.get_bool(lt::settings_pack::enable_incoming_utp)),
+            @"encryptionPolicy": @(effective.get_int(lt::settings_pack::in_enc_policy)),
+            @"proxyType": @(effective.get_int(lt::settings_pack::proxy_type)),
+            @"listenInterfaces": stringValue(effective.get_str(lt::settings_pack::listen_interfaces))};
+        NSMutableArray *torrents = [NSMutableArray array];
+        for (const lt::torrent_handle &handle : engine->session.get_torrents())
+        {
+            const auto status = handle.status();
+            [torrents addObject:@{@"id": stringValue(engine->torrentID(handle)),
+                @"maxConnections": @(handle.max_connections()),
+                @"sequentialDownloads": @(bool(status.flags & lt::torrent_flags::sequential_download)),
+                @"enablePeX": @(!bool(status.flags & lt::torrent_flags::disable_pex)),
+                @"autoManaged": @(bool(status.flags & lt::torrent_flags::auto_managed)),
+                @"preallocateFiles": @(status.storage_mode == lt::storage_mode_allocate)}];
+        }
+        result[@"torrents"] = torrents;
+        NSData *data = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        if (!data)
+            return nullptr;
+        return copyString(std::string(static_cast<const char *>(data.bytes), data.length));
+    }
 }
 
 int cbt_engine_set_file_priority(CBTEngine *engine, const char *torrentID, int fileIndex, int priority, char **error)

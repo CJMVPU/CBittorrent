@@ -14,8 +14,11 @@ enum Titanium {
     static let orange = NSColor(hex: 0xAD8144)
     static let red = NSColor(hex: 0xB45E69)
 
-    static func font(_ size: CGFloat) -> NSFont {
-        NSFont(name: "LXGWWenKaiMono-Medium", size: size)
+    // A single point increase keeps every view on the same typographic scale.
+    // Header/footer geometry remains 32/27 points.
+    static func font(_ baseSize: CGFloat) -> NSFont {
+        let size = baseSize + 1
+        return NSFont(name: "LXGWWenKaiMono-Medium", size: size)
             ?? NSFont(name: "LXGW WenKai Mono Medium", size: size)
             ?? NSFont.monospacedSystemFont(ofSize: size, weight: .medium)
     }
@@ -103,9 +106,47 @@ final class TitlebarView: SurfaceView {
     }
 }
 
+/// Draw the icon and title as one compact group. AppKit's image-leading layout
+/// otherwise reserves separate regions for the icon and title in wide buttons.
+final class ActionButtonCell: NSButtonCell {
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        let hasImage = image != nil && imagePosition != .noImage
+        let hasTitle = !title.isEmpty && imagePosition != .imageOnly
+        let content = cellFrame.insetBy(dx: hasTitle ? 8 : 4, dy: 2)
+        let iconSide = hasImage ? min((font?.pointSize ?? 12) + 1, content.height, content.width) : 0
+        let gap: CGFloat = hasImage && hasTitle ? 6 : 0
+        let titleSize = hasTitle ? attributedTitle.size() : .zero
+        let titleWidth = min(ceil(titleSize.width), max(0, content.width - iconSide - gap))
+        let groupWidth = iconSide + gap + titleWidth
+        let originX: CGFloat
+        switch alignment {
+        case .left: originX = content.minX
+        case .right: originX = content.maxX - groupWidth
+        default: originX = cellFrame.midX - groupWidth / 2
+        }
+        if let image, hasImage {
+            let imageFrame = NSRect(x: originX, y: cellFrame.midY - iconSide / 2,
+                                    width: iconSide, height: iconSide)
+            drawImage(image, withFrame: imageFrame, in: controlView)
+        }
+        if hasTitle {
+            let titleFrame = NSRect(x: originX + iconSide + gap,
+                                    y: cellFrame.midY - ceil(titleSize.height) / 2,
+                                    width: titleWidth, height: ceil(titleSize.height))
+            let text = NSMutableAttributedString(attributedString: attributedTitle)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .left
+            paragraph.lineBreakMode = .byTruncatingTail
+            text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+            text.draw(in: titleFrame)
+        }
+    }
+}
+
 final class ActionButton: NSButton {
     var handler: (() -> Void)?
     var active = false { didSet { updateAppearance() } }
+    var selectionChangesBackground = true { didSet { updateAppearance() } }
     var restingColor: NSColor = .clear { didSet { updateAppearance() } }
     var tint: NSColor = Titanium.muted { didSet { updateAppearance() } }
     var hoverColor: NSColor = Titanium.hover
@@ -114,6 +155,9 @@ final class ActionButton: NSButton {
 
     init(_ title: String = "", symbol: String? = nil, frame: NSRect = .zero, action: (() -> Void)? = nil) {
         super.init(frame: frame)
+        cell = ActionButtonCell(textCell: title)
+        setButtonType(.momentaryPushIn)
+        alignment = .center
         self.title = title
         handler = action
         isBordered = false
@@ -151,7 +195,7 @@ final class ActionButton: NSButton {
     override func mouseExited(with event: NSEvent) { hovering = false; updateAppearance() }
 
     private func updateAppearance() {
-        layer?.backgroundColor = (active ? Titanium.selection : hovering ? hoverColor : restingColor).cgColor
+        layer?.backgroundColor = (active && selectionChangesBackground ? Titanium.selection : hovering ? hoverColor : restingColor).cgColor
         contentTintColor = active ? Titanium.accent : tint
         attributedTitle = NSAttributedString(string: title, attributes: [
             .font: font ?? Titanium.font(11),

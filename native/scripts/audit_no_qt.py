@@ -2,6 +2,7 @@
 """Audit every Mach-O in a standalone CBittorrent bundle, without launching it."""
 
 import argparse
+import json
 from pathlib import Path
 import plistlib
 import re
@@ -62,6 +63,22 @@ def audit(app):
                     raise RuntimeError(f"External runtime search path in {path}: {rpath}")
     if not binaries or not (executable_dir / "CBittorrent").is_file():
         raise RuntimeError("CBittorrent executable is missing.")
+    icon_name = plist.get("CFBundleIconFile", "")
+    icon = app / "Contents/Resources" / icon_name
+    if not icon_name or not icon.is_file() or icon.read_bytes()[:4] != b"icns":
+        raise RuntimeError("The application icon must be a bundled ICNS resource.")
+    catalog = app / "Contents/Resources/Assets.car"
+    if plist.get("CFBundleIconName") != "AppIcon" or not catalog.is_file():
+        raise RuntimeError("System surfaces require a bundled named AppIcon asset catalog.")
+    assets = json.loads(output(["xcrun", "assetutil", "--info", catalog]))
+    icon_assets = [asset for asset in assets if asset.get("Name") == "AppIcon"
+                   and asset.get("AssetType") == "Icon Image"]
+    sizes = {asset.get("PixelWidth") for asset in icon_assets}
+    if not {16, 32, 64, 128, 256, 512, 1024}.issubset(sizes):
+        raise RuntimeError("AppIcon catalog is missing required macOS icon representations.")
+    symbol = app / "Contents/Resources/CB-symbol.png"
+    if not symbol.is_file() or symbol.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError("The shared artistic CB menu-bar artwork is missing.")
     font = app / "Contents/Resources/Fonts/LXGWWenKaiMono-Medium.ttf"
     if not font.is_file() or not font.with_name("OFL.txt").is_file():
         raise RuntimeError("The requested font and its license must be bundled.")

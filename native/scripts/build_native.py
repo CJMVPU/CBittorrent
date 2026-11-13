@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import plistlib
 import shlex
 import shutil
 import subprocess
@@ -99,6 +100,49 @@ def package_libraries(executable, frameworks, search_paths):
     return sources
 
 
+def compile_app_icon(objects_dir, resources, plist_path):
+    """Give system-owned surfaces a real named app-icon asset, not just a Dock override."""
+    catalog = objects_dir / "AppAssets.xcassets"
+    if catalog.exists():
+        shutil.rmtree(catalog)
+    iconset = catalog / "AppIcon.appiconset"
+    iconset.mkdir(parents=True)
+    metadata = {"info": {"author": "xcode", "version": 1}}
+    (catalog / "Contents.json").write_text(json.dumps(metadata) + "\n")
+    images = []
+    artwork = NATIVE / "Design/CB-app-icon.png"
+    for size in (16, 32, 128, 256, 512):
+        for scale in (1, 2):
+            filename = f"icon_{size}x{size}@{scale}x.png"
+            pixels = size * scale
+            run(["sips", "-z", pixels, pixels, artwork, "--out", iconset / filename],
+                stdout=subprocess.DEVNULL)
+            images.append({"idiom": "mac", "size": f"{size}x{size}",
+                           "scale": f"{scale}x", "filename": filename})
+    (iconset / "Contents.json").write_text(json.dumps({**metadata, "images": images}, indent=2) + "\n")
+    partial = objects_dir / "AppIcon-info.plist"
+    run(["xcrun", "actool", catalog, "--compile", resources, "--platform", "macosx",
+         "--minimum-deployment-target", MINIMUM_MACOS, "--app-icon", "AppIcon",
+         "--output-partial-info-plist", partial, "--output-format", "human-readable-text"])
+    with plist_path.open("rb") as stream:
+        info = plistlib.load(stream)
+    with partial.open("rb") as stream:
+        icon_info = plistlib.load(stream)
+    if icon_info.get("CFBundleIconName") != "AppIcon" or not (resources / "Assets.car").is_file():
+        raise RuntimeError("Asset compiler did not produce the named AppIcon catalog.")
+    info.update(icon_info)
+    # actool emits the macOS ICNS name without its extension. Store the explicit
+    # resource name as well so older icon consumers have an unambiguous fallback.
+    fallback = info.get("CFBundleIconFile", "")
+    if not fallback.endswith(".icns"):
+        fallback += ".icns"
+    if not (resources / fallback).is_file():
+        raise RuntimeError("Asset compiler did not produce its ICNS fallback.")
+    info["CFBundleIconFile"] = fallback
+    with plist_path.open("wb") as stream:
+        plistlib.dump(info, stream, sort_keys=False)
+
+
 def copy_licenses(sources, destination):
     shutil.copy2(ROOT / "COPYING", destination / "CBittorrent-COPYING.txt")
     for path in (ROOT / "COPYING.GPLv2", ROOT / "COPYING.GPLv3"):
@@ -153,6 +197,7 @@ def main():
         directory.mkdir(parents=True, exist_ok=True)
     shutil.copy2(NATIVE / "Info.plist", contents / "Info.plist")
     shutil.copytree(NATIVE / "Resources", resources, dirs_exist_ok=True)
+    compile_app_icon(objects_dir, resources, contents / "Info.plist")
     licenses = resources / "Licenses"
     licenses.mkdir(exist_ok=True)
     cxx = output(["xcrun", "--find", "clang++"])

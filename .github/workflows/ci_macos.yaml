@@ -46,7 +46,7 @@ jobs:
       - name: Validate workflows and scripts
         run: |
           actionlint -color .github/workflows/*.yaml
-          shellcheck native/build.sh native/tests/run.sh native/scripts/ci.sh
+          shellcheck native/build.sh native/tests/*.sh native/scripts/*.sh
           python3 -m compileall -q native/scripts
           git diff --check HEAD^ HEAD
 

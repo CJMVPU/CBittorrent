@@ -5,9 +5,13 @@ final class EngineService: @unchecked Sendable {
     private let queue = DispatchQueue(label: "io.github.CJMVPU.CBittorrent.engine", qos: .utility)
     private var handle: OpaquePointer?
 
-    init(profilePath: String) throws {
+    init(profilePath: String, settings: AppSettings) throws {
+        let data = try JSONEncoder().encode(settings.validated())
+        let json = String(decoding: data, as: UTF8.self)
         var error: UnsafeMutablePointer<CChar>?
-        handle = profilePath.withCString { cbt_engine_create($0, &error) }
+        handle = profilePath.withCString { profile in
+            json.withCString { cbt_engine_create_configured(profile, $0, &error) }
+        }
         if let error {
             let message = String(cString: error)
             cbt_string_free(error)
@@ -95,6 +99,27 @@ final class EngineService: @unchecked Sendable {
             var error: UnsafeMutablePointer<CChar>?
             let result = cbt_engine_set_limits(handle, Int32(clamping: download), Int32(clamping: upload), &error)
             try Self.check(result, error)
+        }
+    }
+
+    func applySettings(_ settings: AppSettings) async throws {
+        let data = try JSONEncoder().encode(settings.validated())
+        let json = String(decoding: data, as: UTF8.self)
+        try await perform { handle in
+            var error: UnsafeMutablePointer<CChar>?
+            let result = json.withCString { cbt_engine_apply_settings(handle, $0, &error) }
+            try Self.check(result, error)
+        }
+    }
+
+    /// Adds the saved default list without removing trackers already on a task.
+    func applyDefaultTrackers() async throws -> Int {
+        try await perform { handle in
+            var error: UnsafeMutablePointer<CChar>?
+            var changed: Int32 = 0
+            let result = cbt_engine_apply_default_trackers(handle, &changed, &error)
+            try Self.check(result, error)
+            return Int(changed)
         }
     }
 
