@@ -2,7 +2,7 @@ name: Native macOS CI
 
 on:
   push:
-    branches: [master, 'codex/**']
+    branches: [master, codex]
   pull_request:
     branches: [master]
   workflow_dispatch:

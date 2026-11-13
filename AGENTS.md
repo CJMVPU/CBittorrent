@@ -17,6 +17,20 @@ Additionally, consult the README and CODING_GUIDELINES files in the respective f
 
 Use clear, appropriate English for non-native readers.
 
+## Branch Workflow
+
+* Keep exactly two long-lived branches: `master` and `codex`.
+* Use the existing `codex` branch for all development, commits and pushes.
+  Do not create task-specific `codex/*` branches unless the user explicitly
+  requests a different workflow.
+* Before starting work, fetch the remote and synchronize `codex` with `master`
+  without discarding commits or uncommitted changes.
+* Push changes to `codex`, verify the relevant checks, then merge into `master`
+  and push `master` when the user requests integration. Prefer fast-forward
+  merges when possible; do not force-push shared history.
+* After integration, return to `codex` for subsequent work. Retain and reuse
+  `codex`; do not delete it after merging.
+
 ## Code Review Guidelines
 
 * Respect project configuration. \
