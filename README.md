@@ -30,14 +30,17 @@ See [native documentation](native/README.md) for details and validation.
 Keep two branches: `master` and `codex`.
 Develop, commit and push on `codex`.
 After checks pass, merge into `master` and push.
-Return to `codex` for the next change; reuse it instead of adding branches.
+Return to `codex` for the next change.
+Reuse it instead of adding branches.
 
 ## Scope and license
 
 This independent project began as a [qBittorrent] fork.
-Upstream code remains as reference and is not part of the native build.
+Upstream code remains as reference.
+It is not part of the native build.
 Feature coverage is incomplete; see the [migration map].
-CBittorrent stores its own profile and leaves qBittorrent data unchanged.
+CBittorrent stores its own profile.
+Existing qBittorrent data remains unchanged.
 
 Source is licensed under [GPL-2.0-or-later][license].
 Dependency licenses are included in the app bundle.
