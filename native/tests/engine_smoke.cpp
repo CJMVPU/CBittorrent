@@ -347,6 +347,7 @@ int main()
             return firstTorrent(state).get<std::string>("state") == "paused";
         });
         require(firstTorrent(restored).get<std::string>("id") == id, "Restored torrent ID changed");
+        require(restored.get<int64_t>("historicalDownloaded") >= static_cast<int64_t>(payload.size()), "Restart lost historical traffic");
         require(restored.get<int64_t>("totalDownloaded") == 0, "New session inherited previous session traffic");
         require(firstTorrent(restored).get_child("files").front().second.get<int>("priority") == 7, "File priority was not restored");
         char *error = nullptr;
@@ -359,6 +360,8 @@ int main()
         call([&](char **failure) { return cbt_engine_save(download.get(), failure); });
         download.reset();
         download = create(root / "download-profile");
+        const auto retainedHistory = snapshot(download.get()).get<int64_t>("historicalDownloaded");
+        require(retainedHistory == restored.get<int64_t>("historicalDownloaded"), "Task removal lost or double-counted history");
         require(snapshot(download.get()).get_child("torrents").empty(), "Removed torrent returned after restart");
         require(readFile(root / "download/payload.bin") == payload, "Keep-files removal deleted data");
         require(settings(download.get()).get<int>("bookkeeping.identities") == 0
@@ -427,6 +430,34 @@ int main()
         require(seed != nullptr, creationError ? creationError : "Timed session creation failed");
         cbt_string_free(creationError);
         waitFor(seed.get(), [](const pt::ptree &state) { return firstTorrent(state).get<std::string>("state") == "paused"; });
+        // Legacy migration reads resume counters once, not file sizes.
+        download.reset();
+        seed.reset();
+        const auto migrationProfile = root / "migration-profile";
+        fs::create_directories(migrationProfile / "ResumeData");
+        lt::add_torrent_params legacy = lt::load_torrent_file(torrentPath.string());
+        legacy.save_path = (root / "download").string();
+        legacy.total_downloaded = 400;
+        legacy.total_uploaded = 100;
+        legacy.flags |= lt::torrent_flags::paused;
+        legacy.flags &= ~lt::torrent_flags::auto_managed;
+        const auto legacyBytes = lt::write_resume_data_buf(legacy);
+        std::ofstream legacyFile(migrationProfile / "ResumeData/legacy.fastresume", std::ios::binary);
+        legacyFile.write(legacyBytes.data(), legacyBytes.size());
+        legacyFile.close();
+        auto migrated = create(migrationProfile);
+        require(snapshot(migrated.get()).get<int64_t>("historicalDownloaded") == 400, "Legacy download migration incorrect");
+        require(snapshot(migrated.get()).get<int64_t>("historicalUploaded") == 100, "Legacy upload migration incorrect");
+        migrated.reset();
+        migrated = create(migrationProfile);
+        require(snapshot(migrated.get()).get<int64_t>("historicalUploaded") == 100, "Migration counted twice");
+        migrated.reset();
+        std::ofstream(migrationProfile / "statistics.json") << "corrupt";
+        char *statisticsError = nullptr;
+        auto invalid = cbt_engine_create(migrationProfile.c_str(), &statisticsError);
+        require(invalid == nullptr && statisticsError != nullptr, "Corrupt history silently reset");
+        cbt_string_free(statisticsError);
+        require(readFile(migrationProfile / "statistics.json") == "corrupt", "Corrupt history overwritten");
         download.reset();
         seed.reset();
         fs::remove_all(root);

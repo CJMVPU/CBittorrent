@@ -157,6 +157,6 @@ final class PeerDetailView: SurfaceView, NSTableViewDataSource, NSTableViewDeleg
         let state = peer.state == "connecting" ? "连接中" : peer.state == "handshake" ? "握手中" : "已连接"
         details.stringValue = "本地 \(peer.localEndpoint) → 远端 \(peer.endpoint) · \(state) · \(encryption)\n"
             + "已下载 \(Titanium.bytes(peer.downloaded)) · 已上传 \(Titanium.bytes(peer.uploaded)) · 来源 \(peer.sources.isEmpty ? "未知" : peer.sources.joined(separator: "、"))\n"
-            + "本机上传：\(peer.uploadChoked ? "暂未允许" : "允许") · 对端上传：\(peer.downloadChoked ? "暂未允许" : "允许") · 累计量在重新连接后重置"
+            + "本机上传：\(peer.uploadChoked ? "暂未允许" : "允许") · 对端上传：\(peer.downloadChoked ? "暂未允许" : "允许") · 对端需求：\(peer.remoteInterested.map { $0 ? "需要数据" : "暂无需求" } ?? "未知")"
     }
 }

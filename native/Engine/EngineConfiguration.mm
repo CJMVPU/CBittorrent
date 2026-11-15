@@ -140,7 +140,7 @@ namespace NativeEngine
     lt::settings_pack initialSettings()
     {
         lt::settings_pack settings;
-        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.7.0");
+        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.7.1");
         settings.set_int(lt::settings_pack::alert_mask,
             static_cast<std::uint32_t>(lt::alert_category::error | lt::alert_category::storage | lt::alert_category::status));
         settings.set_int(lt::settings_pack::active_downloads, 3);

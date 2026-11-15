@@ -18,6 +18,7 @@ struct PeerSnapshot: Codable, Identifiable {
     var uploadChoked: Bool
     var downloadChoked: Bool
     var sources: [String]
+    var remoteInterested: Bool?
 
     var endpoint: String { Self.endpoint(address: address, port: port) }
     var localEndpoint: String { Self.endpoint(address: localAddress, port: localPort) }

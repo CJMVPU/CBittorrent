@@ -23,6 +23,8 @@ struct CBTEngine
     std::string torrentID(const lt::torrent_handle &handle);
     void report(const std::string &message);
     void restore();
+    void restoreStatistics();
+    void saveStatistics();
     lt::torrent_flags_t policyFlags() const;
     int connectionLimit() const;
     void configureParameters(lt::add_torrent_params &params) const;
@@ -49,6 +51,9 @@ struct CBTEngine
     int dhtNodes = 0;
     int64_t totalDownloaded = 0;
     int64_t totalUploaded = 0;
+    int64_t historicalDownloaded = 0;
+    int64_t historicalUploaded = 0;
+    unsigned statisticsGeneration = 0;
     bool saveFailed = false;
     std::chrono::steady_clock::time_point lastSave = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point lastDHT = std::chrono::steady_clock::now();

@@ -10,6 +10,18 @@ struct UITest {
         precondition(widths.count == 8 && widths.allSatisfy { $0 > 0 })
         precondition(widths.reduce(0, +) == 888, "Every column must fit the fixed viewport")
         precondition(widths[0] >= 200, "Keep the name usable in the compact window")
+        precondition(StatusBarPresentation.widths.reduce(13, +) <= 900)
+        var traffic = EngineSnapshot()
+        precondition(StatusBarPresentation.ratio(traffic) == "—")
+        traffic.historicalDownloaded = 0
+        traffic.historicalUploaded = 0
+        precondition(StatusBarPresentation.ratio(traffic) == "—")
+        traffic.historicalUploaded = 1
+        precondition(StatusBarPresentation.ratio(traffic) == "∞")
+        traffic.historicalDownloaded = 4
+        precondition(StatusBarPresentation.ratio(traffic) == "0.25")
+        traffic.totalDownloaded = 999
+        precondition(StatusBarPresentation.ratio(traffic) == "0.25", "Ratio must use history, not session totals")
         testMarquee()
         try testConnectionPageAndSettings()
 

@@ -154,3 +154,11 @@ Use the installed application in /Applications for normal launch/quit acceptance
 Keep older application backups as ZIP archives rather than loose .app bundles,
 so Launch Services does not discover multiple obsolete copies with the same ID.
 A local clean reinstall preserves the complete application support profile.
+
+## 0.7.1 (13)
+
+- Add persistent historical global share ratio to the footer with cumulative
+  upload/download tooltip, independent of task removal and session resets.
+- Import recoverable legacy resume totals once; preserve corrupt history for
+  recovery instead of silently resetting it.
+- Show remote peer interest alongside choking state to help inspect idle uploads.

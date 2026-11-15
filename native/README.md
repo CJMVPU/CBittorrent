@@ -249,3 +249,19 @@ controls. The app does not claim a VPN kill switch or hidden IP addresses.
 
 Protocol behavior follows the upstream [peer information API](https://www.libtorrent.org/reference-Torrent_Handle.html)
 and [settings reference](https://www.libtorrent.org/reference-Settings.html).
+
+## Historical global share ratio (0.7.1)
+
+The footer displays total historical payload uploaded divided by downloaded,
+independent of the selected/filter-visible tasks. Hover for both totals. Zero
+traffic displays a dash; upload without download displays infinity. The separate
+session counters still reset at launch.
+
+`Session/statistics.json` stores history independently of resume files. On first
+upgrade, recoverable counters from existing resume files seed the history once;
+previously removed tasks cannot be reconstructed. Removing tasks never subtracts
+history. Counters are checkpointed with periodic resume saves (30 seconds) and
+explicit saves/shutdown. An abrupt crash can lose traffic since the last successful
+checkpoint. Corrupt history is preserved and reported instead of silently reset.
+Peer diagnostics also show whether the remote peer is interested in our data;
+connection count alone does not establish current upload demand.

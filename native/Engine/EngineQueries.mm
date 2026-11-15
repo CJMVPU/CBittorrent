@@ -117,6 +117,7 @@ static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includ
                                 : (peer.flags & lt::peer_info::plaintext_encrypted) ? @"Handshake" : @"None",
                             @"state": (peer.flags & lt::peer_info::connecting) ? @"connecting"
                                 : (peer.flags & lt::peer_info::handshake) ? @"handshake" : @"connected",
+                            @"remoteInterested": @(bool(peer.flags & lt::peer_info::remote_interested)),
                             @"uploadChoked": @(bool(peer.flags & lt::peer_info::choked)),
                             @"downloadChoked": @(bool(peer.flags & lt::peer_info::remote_choked)), @"sources": sources}];
                     }
@@ -135,6 +136,8 @@ static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includ
             for (const std::string &message : engine->errors)
                 [errors addObject:stringValue(message)];
             NSDictionary *snapshot = @{@"torrents": torrents, @"downloadRate": @(downloadRate), @"uploadRate": @(uploadRate),
+                @"historicalDownloaded": @(engine->historicalDownloaded + engine->totalDownloaded),
+                @"historicalUploaded": @(engine->historicalUploaded + engine->totalUploaded),
                 @"totalDownloaded": @(engine->totalDownloaded), @"totalUploaded": @(engine->totalUploaded), @"dhtNodes": @(engine->dhtNodes),
                 @"listenPort": @(engine->session.listen_port()), @"errors": errors};
             NSError *error = nil;

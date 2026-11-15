@@ -45,6 +45,7 @@ CBTEngine::CBTEngine(const fs::path &profile, NSDictionary *configured)
     ::chmod(profilePath.c_str(), 0700);
     ::chmod(resumePath.c_str(), 0700);
     restore();
+    restoreStatistics();
     for (const lt::torrent_handle &handle : session.get_torrents())
         configureTorrent(handle);
 }
@@ -103,9 +104,13 @@ void CBTEngine::restore()
             configureParameters(params);
             if (![configuration[@"queueEnabled"] boolValue] && (params.flags & lt::torrent_flags::auto_managed))
                 params.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+            const auto downloaded = params.total_downloaded;
+            const auto uploaded = params.total_uploaded;
             const lt::torrent_handle handle = session.add_torrent(std::move(params), error);
             if (error)
                 throw std::runtime_error(error.message());
+            historicalDownloaded += std::max<int64_t>(0, downloaded);
+            historicalUploaded += std::max<int64_t>(0, uploaded);
             torrentIDs.emplace(handle, entry.path().stem().string());
             handlesByID.emplace(entry.path().stem().string(), handle);
         }
@@ -114,6 +119,43 @@ void CBTEngine::restore()
             report("Could not restore " + entry.path().filename().string() + ": " + error.what());
         }
     }
+}
+
+// Historical totals are independent of the current torrent set and session.
+void CBTEngine::restoreStatistics()
+{
+    const auto path = profilePath / "statistics.json";
+    if (fs::exists(path))
+    {
+        if (fs::file_size(path) > 4096)
+            throw std::runtime_error("Traffic statistics file is too large");
+        NSData *data = [NSData dataWithContentsOfFile:stringValue(path.string())];
+        id value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![value isKindOfClass:[NSDictionary class]])
+            throw std::runtime_error("Cannot read traffic statistics; original file preserved");
+        for (NSString *key in @[@"downloaded", @"uploaded"])
+        {
+            id number = value[key];
+            if (![number isKindOfClass:[NSNumber class]] || CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID()
+                || CFNumberIsFloatType((__bridge CFNumberRef)number) || [number longLongValue] < 0)
+                throw std::runtime_error("Invalid traffic statistics; original file preserved");
+        }
+        historicalDownloaded = [value[@"downloaded"] longLongValue];
+        historicalUploaded = [value[@"uploaded"] longLongValue];
+    }
+    else
+        saveStatistics(); // One-time migration from restored resume counters.
+}
+
+void CBTEngine::saveStatistics()
+{
+    NSDictionary *value = @{@"downloaded": @(historicalDownloaded + totalDownloaded),
+        @"uploaded": @(historicalUploaded + totalUploaded)};
+    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+    if (!data)
+        throw std::runtime_error("Cannot encode traffic statistics");
+    const char *bytes = static_cast<const char *>(data.bytes);
+    atomicWrite(profilePath / "statistics.json", std::vector<char>(bytes, bytes + data.length));
 }
 
 lt::torrent_flags_t CBTEngine::policyFlags() const
@@ -239,6 +281,7 @@ void CBTEngine::processAlerts()
         }
         else if (const auto *stats = lt::alert_cast<lt::session_stats_alert>(alert))
         {
+            ++statisticsGeneration;
             const auto counters = stats->counters();
             const int received = lt::find_metric_idx("net.recv_payload_bytes");
             const int sent = lt::find_metric_idx("net.sent_payload_bytes");
@@ -291,6 +334,7 @@ void CBTEngine::requestSaves()
 {
     for (const lt::torrent_handle &handle : session.get_torrents())
         queueSave(handle);
+    saveStatistics();
     lastSave = std::chrono::steady_clock::now();
 }
 
@@ -320,6 +364,16 @@ void CBTEngine::save(bool all)
             queueSave(handle);
     }
     drain();
+    const auto generation = statisticsGeneration;
+    session.post_session_stats();
+    while (statisticsGeneration == generation && std::chrono::steady_clock::now() < deadline)
+    {
+        session.wait_for_alert(100ms);
+        processAlerts();
+    }
+    if (statisticsGeneration == generation)
+        throw std::runtime_error("Timed out saving traffic statistics");
+    saveStatistics();
     if (saveFailed)
         throw std::runtime_error("Some task state could not be saved; check the application log");
 }

@@ -279,7 +279,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func buildStatusbar() {
         let statusbar = SurfaceView(frame: NSRect(x: 0, y: 573, width: 900, height: 27), color: Titanium.chrome)
         surface.addSubview(statusbar)
-        let widths: [CGFloat] = [120, 90, 100, 100, 220, 90, 154]
+        let widths: [CGFloat] = StatusBarPresentation.widths
         var x: CGFloat = 13
         for width in widths {
             let label = Titanium.label(size: 10, color: Titanium.muted)
@@ -363,7 +363,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             "↓ \(Titanium.bytes(snapshot.downloadRate))/s",
             "↑ \(Titanium.bytes(snapshot.uploadRate))/s",
             "会话 ↓ \(Titanium.bytes(snapshot.totalDownloaded)) ↑ \(Titanium.bytes(snapshot.totalUploaded))",
-            "DHT \(snapshot.dhtNodes)", diskStatus
+            "DHT \(snapshot.dhtNodes)", diskStatus,
+            "全局分享率 \(StatusBarPresentation.ratio(snapshot))"
         ]
         for (label, value) in zip(statusLabels, values) {
             if label.stringValue != value {
@@ -371,6 +372,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
                 label.toolTip = value
             }
         }
+        statusLabels[7].toolTip = StatusBarPresentation.ratioTooltip(snapshot)
         statusLabels[1].toolTip = "当前所有任务的已连接 Peer 总数：\(connections)"
         statusLabels[4].toolTip = "本次会话：下载 \(Titanium.bytes(snapshot.totalDownloaded)) · 上传 \(Titanium.bytes(snapshot.totalUploaded))"
         statusLabels[5].toolTip = "DHT 节点：\(snapshot.dhtNodes) · 监听端口：\(snapshot.listenPort)"

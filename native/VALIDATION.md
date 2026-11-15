@@ -358,3 +358,19 @@ was removed or replaced by the isolated UI test profile.
 - Installed 0.7.0 (12) matches the final verified bundle. All three profile files
   remained byte-identical across replacement. Final startup, live diagnostics
   and pause/resume accessibility were rechecked after installation.
+
+## 0.7.1 — Historical global share ratio (2026-11-15)
+
+- Full release verification passed all seven CTest groups, signature/dependency
+  checks and ZIP round trip. Engine tests cover restart and task-removal history,
+  one-time resume migration and corrupt statistics preservation. UI tests cover
+  missing/zero history, upload-only infinity, ratio arithmetic and footer widths.
+- Installed 0.7.1 (13) matches the verified bundle; all saved profile files were
+  unchanged during replacement. First launch creates the independent statistics
+  file from recoverable existing resume counters.
+- Native accessibility confirmed both existing tasks restored and the footer
+  displaying global ratio 0.05. Live upload was observed at 557 B/s after startup;
+  the preceding session had uploaded 2.6 MiB. These observations do not establish
+  public inbound reachability or the cause of each idle peer. Screenshot capture
+  returned a distorted window, so visual pixel-level acceptance is not claimed.
+- Evidence and installation receipt: `build/release-0.7.1/`.

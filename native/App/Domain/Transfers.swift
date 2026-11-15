@@ -42,13 +42,15 @@ struct EngineSnapshot: Codable {
     var uploadRate: Int64 = 0
     var totalDownloaded: Int64 = 0
     var totalUploaded: Int64 = 0
+    var historicalDownloaded: Int64?
+    var historicalUploaded: Int64?
     var dhtNodes: Int = 0
     var listenPort: Int = 0
     var errors: [String] = []
     var summary = TransferSummary(torrents: [])
 
     private enum CodingKeys: String, CodingKey {
-        case torrents, downloadRate, uploadRate, totalDownloaded, totalUploaded, dhtNodes, listenPort, errors
+        case torrents, downloadRate, uploadRate, totalDownloaded, totalUploaded, historicalDownloaded, historicalUploaded, dhtNodes, listenPort, errors
     }
 }
 
