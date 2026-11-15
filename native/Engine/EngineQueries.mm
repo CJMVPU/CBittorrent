@@ -168,4 +168,3 @@ char *cbt_engine_settings_json(CBTEngine *engine)
         return copyString(std::string(static_cast<const char *>(data.bytes), data.length));
     }
 }
-
