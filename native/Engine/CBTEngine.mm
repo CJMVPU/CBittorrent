@@ -235,7 +235,7 @@ namespace
     lt::settings_pack initialSettings()
     {
         lt::settings_pack settings;
-        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.4.1");
+        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.5.0");
         settings.set_int(lt::settings_pack::alert_mask,
             static_cast<std::uint32_t>(lt::alert_category::error | lt::alert_category::storage | lt::alert_category::status));
         settings.set_int(lt::settings_pack::active_downloads, 3);
@@ -340,11 +340,9 @@ struct CBTEngine
     lt::torrent_handle find(const char *id)
     {
         const std::string wanted = requiredString(id, "Torrent ID");
-        for (const lt::torrent_handle &handle : session.get_torrents())
-        {
-            if (torrentID(handle) == wanted)
-                return handle;
-        }
+        const auto found = handlesByID.find(wanted);
+        if (found != handlesByID.end() && found->second.is_valid())
+            return found->second;
         throw std::runtime_error("The selected torrent no longer exists");
     }
 
@@ -353,7 +351,10 @@ struct CBTEngine
         const auto found = torrentIDs.find(handle);
         if (found != torrentIDs.end())
             return found->second;
-        return torrentIDs.emplace(handle, hashString(handle.info_hashes())).first->second;
+        const std::string id = hashString(handle.info_hashes());
+        torrentIDs.emplace(handle, id);
+        handlesByID.emplace(id, handle);
+        return id;
     }
 
     void report(const std::string &message)
@@ -387,26 +388,43 @@ struct CBTEngine
                 params.flags |= lt::torrent_flags::duplicate_is_error;
                 // Apply per-task policy before adding the handle: restored peers must
                 // not briefly use an old PeX or connection configuration.
-                params.flags &= ~(lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download);
-                if (![configuration[@"enablePeX"] boolValue])
-                    params.flags |= lt::torrent_flags::disable_pex;
-                if ([configuration[@"sequentialDownloads"] boolValue])
-                    params.flags |= lt::torrent_flags::sequential_download;
-                params.max_connections = [configuration[@"maxConnectionsPerTorrent"] intValue];
-                if (params.max_connections == 0)
-                    params.max_connections = -1;
+                configureParameters(params);
                 if (![configuration[@"queueEnabled"] boolValue] && (params.flags & lt::torrent_flags::auto_managed))
                     params.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
                 const lt::torrent_handle handle = session.add_torrent(std::move(params), error);
                 if (error)
                     throw std::runtime_error(error.message());
                 torrentIDs.emplace(handle, entry.path().stem().string());
+                handlesByID.emplace(entry.path().stem().string(), handle);
             }
             catch (const std::exception &error)
             {
                 report("Could not restore " + entry.path().filename().string() + ": " + error.what());
             }
         }
+    }
+
+    lt::torrent_flags_t policyFlags() const
+    {
+        lt::torrent_flags_t flags;
+        if (![configuration[@"enablePeX"] boolValue])
+            flags |= lt::torrent_flags::disable_pex;
+        if ([configuration[@"sequentialDownloads"] boolValue])
+            flags |= lt::torrent_flags::sequential_download;
+        return flags;
+    }
+
+    int connectionLimit() const
+    {
+        const int limit = [configuration[@"maxConnectionsPerTorrent"] intValue];
+        return limit == 0 ? -1 : limit;
+    }
+
+    void configureParameters(lt::add_torrent_params &params) const
+    {
+        params.flags &= ~(lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download);
+        params.flags |= policyFlags();
+        params.max_connections = connectionLimit();
     }
 
     void configureTorrent(const lt::torrent_handle &handle)
@@ -424,14 +442,8 @@ struct CBTEngine
         }
         // A manually paused task stays paused when unrelated settings change.
         const auto mask = lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download;
-        lt::torrent_flags_t flags;
-        if (![configuration[@"enablePeX"] boolValue])
-            flags |= lt::torrent_flags::disable_pex;
-        if ([configuration[@"sequentialDownloads"] boolValue])
-            flags |= lt::torrent_flags::sequential_download;
-        handle.set_flags(flags, mask);
-        const int connections = [configuration[@"maxConnectionsPerTorrent"] intValue];
-        handle.set_max_connections(connections == 0 ? -1 : connections);
+        handle.set_flags(policyFlags(), mask);
+        handle.set_max_connections(connectionLimit());
     }
 
     void applyConfiguration(NSDictionary *next)
@@ -479,10 +491,10 @@ struct CBTEngine
         {
             if (const auto *saved = lt::alert_cast<lt::save_resume_data_alert>(alert))
             {
-                const std::string id = torrentID(saved->handle);
                 pendingSaves.erase(saved->handle);
-                if (removedHandles.count(saved->handle))
+                if (removedHandles.erase(saved->handle))
                     continue;
+                const std::string id = torrentID(saved->handle);
                 try
                 {
                     atomicWrite(resumePath / (id + ".fastresume"), lt::write_resume_data_buf(saved->params));
@@ -490,15 +502,17 @@ struct CBTEngine
                 catch (const std::exception &error)
                 {
                     saveFailed = true;
+                    dirtyHandles.insert(saved->handle);
                     report(error.what());
                 }
             }
             else if (const auto *failed = lt::alert_cast<lt::save_resume_data_failed_alert>(alert))
             {
                 pendingSaves.erase(failed->handle);
-                if (removedHandles.count(failed->handle))
+                if (removedHandles.erase(failed->handle))
                     continue;
                 saveFailed = true;
+                dirtyHandles.insert(failed->handle);
                 report("Could not save a torrent: " + failed->error.message());
             }
             else if (const auto *stats = lt::alert_cast<lt::dht_stats_alert>(alert))
@@ -535,19 +549,36 @@ struct CBTEngine
 
     void requestSave(const lt::torrent_handle &handle)
     {
+        dirtyHandles.insert(handle);
+    }
+
+    void queueSave(const lt::torrent_handle &handle)
+    {
         torrentID(handle);
         if (pendingSaves.insert(handle).second)
-            handle.save_resume_data(lt::torrent_handle::save_info_dict);
+        {
+            try
+            {
+                handle.save_resume_data(lt::torrent_handle::save_info_dict);
+                dirtyHandles.erase(handle);
+            }
+            catch (...)
+            {
+                pendingSaves.erase(handle);
+                dirtyHandles.insert(handle);
+                throw;
+            }
+        }
     }
 
     void requestSaves()
     {
         for (const lt::torrent_handle &handle : session.get_torrents())
-            requestSave(handle);
+            queueSave(handle);
         lastSave = std::chrono::steady_clock::now();
     }
 
-    void save()
+    void save(bool all = true)
     {
         processAlerts();
         saveFailed = false;
@@ -564,7 +595,14 @@ struct CBTEngine
         };
         // Finish older snapshots before requesting the current pause/priority state.
         drain();
-        requestSaves();
+        if (all)
+            requestSaves();
+        else
+        {
+            const auto dirty = dirtyHandles;
+            for (const auto &handle : dirty)
+                queueSave(handle);
+        }
         drain();
         if (saveFailed)
             throw std::runtime_error("Some task state could not be saved; check the application log");
@@ -576,7 +614,9 @@ struct CBTEngine
     lt::session session;
     NSDictionary *configuration;
     std::set<lt::torrent_handle> pendingSaves;
+    std::set<lt::torrent_handle> dirtyHandles;
     std::map<lt::torrent_handle, std::string> torrentIDs;
+    std::map<std::string, lt::torrent_handle> handlesByID;
     std::set<lt::torrent_handle> removedHandles;
     std::vector<std::string> errors;
     int dhtNodes = 0;
@@ -657,7 +697,12 @@ void cbt_engine_destroy(CBTEngine *engine)
     delete engine;
 }
 
-char *cbt_engine_snapshot_json(CBTEngine *engine)
+void cbt_engine_release(CBTEngine *engine)
+{
+    delete engine;
+}
+
+static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includeDetails)
 {
     @autoreleasepool
     {
@@ -678,7 +723,9 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
             NSMutableArray *torrents = [NSMutableArray array];
             int64_t downloadRate = 0;
             int64_t uploadRate = 0;
-            for (const lt::torrent_handle &handle : engine->session.get_torrents())
+            const std::vector<lt::torrent_handle> handles = selectedID
+                ? std::vector<lt::torrent_handle>{engine->find(selectedID)} : engine->session.get_torrents();
+            for (const lt::torrent_handle &handle : handles)
             {
                 const lt::torrent_status status = handle.status();
                 const int64_t remaining = std::max<int64_t>(0, status.total_wanted - status.total_wanted_done);
@@ -686,7 +733,7 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
                 const int64_t ratioBytes = status.all_time_download > 0 ? status.all_time_download : status.total_wanted;
                 const double ratio = ratioBytes > 0 ? static_cast<double>(status.all_time_upload) / ratioBytes : 0;
                 NSMutableArray *files = [NSMutableArray array];
-                if (const std::shared_ptr<const lt::torrent_info> info = handle.torrent_file())
+                if (const std::shared_ptr<const lt::torrent_info> info = includeDetails ? handle.torrent_file() : nullptr)
                 {
                     const std::vector<int64_t> progress = handle.file_progress();
                     const std::vector<lt::download_priority_t> priorities = handle.get_file_priorities();
@@ -702,8 +749,9 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
                     }
                 }
                 NSMutableArray *trackers = [NSMutableArray array];
-                for (const lt::announce_entry &tracker : handle.trackers())
-                    [trackers addObject:@{@"url": stringValue(tracker.url), @"status": @"configured"}];
+                if (includeDetails)
+                    for (const lt::announce_entry &tracker : handle.trackers())
+                        [trackers addObject:@{@"url": stringValue(tracker.url), @"status": @"configured"}];
                 [torrents addObject:@{@"id": stringValue(engine->torrentID(handle)), @"name": stringValue(status.name),
                     @"state": stringValue(stateName(status)), @"progress": @(status.progress), @"totalSize": @(status.total_wanted),
                     @"downloaded": @(status.total_wanted_done), @"uploaded": @(status.all_time_upload),
@@ -724,12 +772,13 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
             NSData *json = [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:&error];
             if (!json)
                 throw std::runtime_error(error.localizedDescription.UTF8String ?: "Cannot serialize task state");
-            engine->errors.clear();
+            if (!selectedID)
+                engine->errors.clear();
             return copyString(std::string(static_cast<const char *>(json.bytes), json.length));
         }
         catch (const std::exception &failure)
         {
-            if (engine)
+            if (engine && !selectedID)
             {
                 const std::lock_guard<std::mutex> lock(engine->mutex);
                 engine->report(failure.what());
@@ -737,6 +786,23 @@ char *cbt_engine_snapshot_json(CBTEngine *engine)
             return nullptr;
         }
     }
+}
+
+char *cbt_engine_snapshot_json(CBTEngine *engine)
+{
+    return snapshotJSON(engine, nullptr, true);
+}
+
+char *cbt_engine_summary_json(CBTEngine *engine)
+{
+    return snapshotJSON(engine, nullptr, false);
+}
+
+char *cbt_engine_detail_json(CBTEngine *engine, const char *torrentID)
+{
+    if (!torrentID || !*torrentID)
+        return nullptr;
+    return snapshotJSON(engine, torrentID, true);
 }
 
 int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, int paused, char **error)
@@ -770,13 +836,7 @@ int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, 
         params.save_path = destination.string();
         params.flags |= lt::torrent_flags::duplicate_is_error;
         params.storage_mode = [state.configuration[@"preallocateFiles"] boolValue] ? lt::storage_mode_allocate : lt::storage_mode_sparse;
-        if (![state.configuration[@"enablePeX"] boolValue])
-            params.flags |= lt::torrent_flags::disable_pex;
-        if ([state.configuration[@"sequentialDownloads"] boolValue])
-            params.flags |= lt::torrent_flags::sequential_download;
-        params.max_connections = [state.configuration[@"maxConnectionsPerTorrent"] intValue];
-        if (params.max_connections == 0)
-            params.max_connections = -1;
+        state.configureParameters(params);
         if (![state.configuration[@"queueEnabled"] boolValue])
             params.flags &= ~lt::torrent_flags::auto_managed;
         if (paused)
@@ -830,22 +890,13 @@ int cbt_engine_remove(CBTEngine *engine, const char *torrentID, int deleteFiles,
         const std::string id = state.torrentID(handle);
         // Remove persisted state first. If that fails, leave the live task intact.
         fs::remove(state.resumePath / (id + ".fastresume"));
-        state.removedHandles.insert(handle);
-        state.pendingSaves.erase(handle);
+        // A tombstone is needed only while an outstanding resume alert can arrive.
+        if (state.pendingSaves.erase(handle))
+            state.removedHandles.insert(handle);
+        state.dirtyHandles.erase(handle);
+        state.handlesByID.erase(id);
+        state.torrentIDs.erase(handle);
         state.session.remove_torrent(handle, deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
-    });
-}
-
-int cbt_engine_set_limits(CBTEngine *engine, int downloadBytesPerSecond, int uploadBytesPerSecond, char **error)
-{
-    return perform(engine, error, [&](CBTEngine &state)
-    {
-        if (downloadBytesPerSecond < 0 || uploadBytesPerSecond < 0)
-            throw std::invalid_argument("Rate limits must not be negative");
-        lt::settings_pack settings;
-        settings.set_int(lt::settings_pack::download_rate_limit, downloadBytesPerSecond);
-        settings.set_int(lt::settings_pack::upload_rate_limit, uploadBytesPerSecond);
-        state.session.apply_settings(settings);
     });
 }
 
@@ -904,6 +955,8 @@ char *cbt_engine_settings_json(CBTEngine *engine)
         const std::lock_guard<std::mutex> lock(engine->mutex);
         const lt::settings_pack effective = engine->session.get_settings();
         NSMutableDictionary *result = [engine->configuration mutableCopy];
+        result[@"bookkeeping"] = @{@"identities": @(engine->torrentIDs.size()),
+            @"lookupEntries": @(engine->handlesByID.size()), @"removedPendingSaves": @(engine->removedHandles.size())};
         result[@"effective"] = @{
             @"downloadRateLimit": @(effective.get_int(lt::settings_pack::download_rate_limit)),
             @"uploadRateLimit": @(effective.get_int(lt::settings_pack::upload_rate_limit)),
@@ -956,6 +1009,11 @@ int cbt_engine_set_file_priority(CBTEngine *engine, const char *torrentID, int f
 int cbt_engine_save(CBTEngine *engine, char **error)
 {
     return perform(engine, error, [](CBTEngine &state) { state.save(); });
+}
+
+int cbt_engine_flush(CBTEngine *engine, char **error)
+{
+    return perform(engine, error, [](CBTEngine &state) { state.save(false); });
 }
 
 int cbt_engine_connect_peer(CBTEngine *engine, const char *torrentID, const char *address, int port, char **error)

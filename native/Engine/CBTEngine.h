@@ -13,13 +13,18 @@ CBTEngine *cbt_engine_create(const char *profilePath, char **error);
 // Apply network/privacy settings before the session starts or tasks are restored.
 CBTEngine *cbt_engine_create_configured(const char *profilePath, const char *settingsJSON, char **error);
 void cbt_engine_destroy(CBTEngine *engine);
+// Release after a successful explicit save; performs no second save.
+void cbt_engine_release(CBTEngine *engine);
 // Returns null on snapshot failure, preserving the caller's previous display.
 char *cbt_engine_snapshot_json(CBTEngine *engine);
+// Lightweight list snapshot; file and tracker arrays are empty.
+char *cbt_engine_summary_json(CBTEngine *engine);
+// Same snapshot envelope, containing only the requested task with details.
+char *cbt_engine_detail_json(CBTEngine *engine, const char *torrentID);
 int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, int paused, char **error);
 int cbt_engine_pause(CBTEngine *engine, const char *torrentID, char **error);
 int cbt_engine_resume(CBTEngine *engine, const char *torrentID, char **error);
 int cbt_engine_remove(CBTEngine *engine, const char *torrentID, int deleteFiles, char **error);
-int cbt_engine_set_limits(CBTEngine *engine, int downloadBytesPerSecond, int uploadBytesPerSecond, char **error);
 // Apply a partial JSON object after validating all supplied engine fields.
 int cbt_engine_apply_settings(CBTEngine *engine, const char *json, char **error);
 // Appends the configured default trackers to existing tasks; reports changed tasks.
@@ -28,6 +33,8 @@ int cbt_engine_apply_default_trackers(CBTEngine *engine, int *changedCount, char
 char *cbt_engine_settings_json(CBTEngine *engine);
 int cbt_engine_set_file_priority(CBTEngine *engine, const char *torrentID, int fileIndex, int priority, char **error);
 int cbt_engine_save(CBTEngine *engine, char **error);
+// Flush only task state changed by explicit commands.
+int cbt_engine_flush(CBTEngine *engine, char **error);
 int cbt_engine_connect_peer(CBTEngine *engine, const char *torrentID, const char *address, int port, char **error);
 void cbt_string_free(char *string);
 

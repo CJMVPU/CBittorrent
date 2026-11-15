@@ -29,8 +29,9 @@ stored in `settings.json`, and per-task resume records in
 two instances cannot write the same session concurrently. `--profile PATH`
 selects a separate profile for testing.
 
-Task state is saved after mutations, periodically during use and before
-orderly exit. Saves replace individual records atomically. A failed exit save
+Task state is flushed after mutations, periodically by the engine and before
+orderly exit. List polling requests summaries; open detail pages request only
+the selected task’s files and trackers. Saves replace individual records atomically. A failed exit save
 keeps the app running and reports the error. Removing a task preserves payload
 files unless the user explicitly selects the delete-files option.
 
@@ -50,3 +51,24 @@ The current validation covers isolated loopback transfer, metadata acquisition,
 state persistence, core native UI interaction and the packaged dependency
 closure. Public tracker, DHT, Internet throughput, sleep/wake and long-running
 real-world torrent workloads need a separate acceptance pass.
+
+
+## Settings coverage
+
+The native client currently exposes 32 persisted settings fields.
+Saved values take precedence; absent fields use AppSettings defaults.
+This is not a complete migration of qBittorrent preferences.
+
+| Missing UI category | Current behavior |
+| --- | --- |
+| Listen interface or IP selection | Fixed to all IPv4/IPv6 interfaces |
+| Upload scheduling algorithm | Fixed slots |
+| Polling and periodic save intervals | One-second AppStore summaries; engine-owned 30-second autosave |
+| Unassigned disk I/O, buffer and connection-rate parameters | libtorrent defaults |
+| Scheduled or alternative limits, per-task limits | Not implemented |
+| Interface binding, IP filtering, proxy credentials | Not implemented |
+| RSS, search plugins, Web UI, remote API, categories/tags | Not implemented |
+
+Libtorrent defaults are not equivalent to qBittorrent defaults.
+The latter explicitly configures additional engine parameters.
+The imported local Tracker list is user data, not a source default.

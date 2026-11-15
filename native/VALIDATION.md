@@ -248,3 +248,55 @@ was removed or replaced by the isolated UI test profile.
   that system-owned surface in addition to the resource/registration checks.
 - Installed application remains on General settings. These are local build and
   installation results; remote CI status must be checked separately after push.
+
+## 0.4.2 — Compact buttons and centered carets (2026-11-13)
+
+- Full local CI passed: release build, both CTest suites, arm64/macOS 27/no-Qt
+  checks, icon resources, signing and ZIP round trip. `build/ci-0.4.2.log`.
+- An isolated AppKit probe checked actual field-editor frames using the bundled
+  font. Search uses a centered 14pt line in a 24pt field; settings inputs use a
+  centered 15pt line in a 22pt field. Display and editing rectangles match.
+- Installed-app UI checks covered search editing, the focused port field,
+  Settings and Add. Action buttons fit their content while preserving their
+  alignment edge. Captures: `build/ui-0.4.2/`.
+- Installed 0.4.2 (9), verified its signature and exact match to the build bundle.
+  Settings remained byte-identical, including 74 Tracker URLs. The old app was
+  archived; the duplicate build app was removed after verification. The release
+  ZIP remains in `build/ci/artifacts`.
+- Audited all 32 persisted settings against UI and engine use. MIGRATION.md
+  distinguishes native defaults, fixed behavior, libtorrent defaults and missing
+  features. This release does not add the missing qBittorrent features.
+- Application remains on General settings. Changes are local on `codex`;
+  no commit, push or remote CI result is claimed for this version.
+
+## 0.5.0 — State, UI and packaging refactor (2026-11-15)
+
+- Full `native/scripts/ci.sh verify` passed: release build and 4/4 CTest suites
+  (`native_engine`, `native_settings`, `native_ui`, `native_packaging`), strengthened
+  four-binary arm64/no-Qt/deployment-target audit, strict signature verification,
+  plist validation and ZIP extraction round trip. Log: `build/ci-0.5.0.log`.
+- Engine regressions cover lightweight summaries and per-task details, removed
+  identity cleanup, preserving global errors during detail polling, injected
+  resume-write failure, dirty-only retry and restart restoration. Existing
+  loopback payload, settings, Tracker, priority and seeding-limit checks pass.
+- Settings regressions cover hidden selection, shared summary values and failed
+  disk/engine settings transactions. UI regressions cover all eight columns
+  fitting 888pt, selection retention without overwriting draft priority choices,
+  empty-list selection and asynchronous directory success/failure.
+- Six packaging tests cover failed-build preservation, promotion rollback,
+  engine/Swift dependency invalidation, actual rpath resolution and library
+  minimum OS validation. A further unchanged real build confirmed engine,
+  Swift executable and icon cache hits: `build/cache-0.5.0.log`.
+- Workflow lint, shell lint, Python compilation and whitespace checks passed.
+- Gracefully quit the previous installed app, archived its bundle and profile
+  under `build/install-backups/0.5.0-20261115`, and installed 0.5.0 (10) at
+  `/Applications/CBittorrent.app`. The installed bundle matched the final build,
+  passed strict signature/dependency checks, and every profile file was
+  byte-identical across replacement. Receipt: that backup directory's
+  `receipt.json`. Downloaded data was not modified by installation.
+- Installed startup was observed via native accessibility: the existing task
+  restored in its previous seeding state. Subsequent CUA actions failed with a
+  macOS ScreenCaptureKit error, so further interactive visual acceptance is not
+  claimed. Geometry and selection regressions passed in the automated harness.
+- This record covers local acceptance. GitHub Actions results belong to the
+  pushed commit and must be checked separately.

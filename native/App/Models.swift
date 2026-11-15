@@ -43,6 +43,11 @@ struct EngineSnapshot: Codable {
     var dhtNodes: Int = 0
     var listenPort: Int = 0
     var errors: [String] = []
+    var summary = TransferSummary(torrents: [])
+
+    private enum CodingKeys: String, CodingKey {
+        case torrents, downloadRate, uploadRate, totalDownloaded, totalUploaded, dhtNodes, listenPort, errors
+    }
 }
 
 enum TaskFilter: String, CaseIterable {
@@ -76,6 +81,49 @@ enum ClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .message(let text): return text
+        }
+    }
+}
+
+/// Computed once per engine update and reused by all presentation surfaces.
+struct TransferSummary {
+    let taskCount: Int
+    let peerCount: Int
+    private let counts: [TaskFilter: Int]
+
+    init(torrents: [TorrentSnapshot]) {
+        taskCount = torrents.count
+        peerCount = torrents.reduce(0) { $0 + $1.peers }
+        counts = Dictionary(uniqueKeysWithValues: TaskFilter.allCases.map { filter in
+            (filter, torrents.reduce(0) { $0 + (filter.matches($1) ? 1 : 0) })
+        })
+    }
+
+    func count(for filter: TaskFilter) -> Int { counts[filter, default: 0] }
+}
+
+struct TransferSelection {
+    static func visible(torrents: [TorrentSnapshot], filter: TaskFilter, search: String) -> [TorrentSnapshot] {
+        torrents.filter { filter.matches($0) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func reconcile(_ selection: Set<String>, visible: [TorrentSnapshot]) -> Set<String> {
+        selection.intersection(Set(visible.map(\.id)))
+    }
+}
+
+/// Persist before applying policy, so a disk failure cannot stop live tasks.
+enum SettingsTransaction {
+    static func commit(persist: () throws -> Void, apply: () async throws -> Void,
+                       rollback: () async throws -> Void) async throws {
+        try persist()
+        do { try await apply() }
+        catch {
+            let original = error
+            do { try await rollback() }
+            catch { throw ClientError.message("设置应用和恢复失败：\(original.localizedDescription)\n\(error.localizedDescription)") }
+            throw original
         }
     }
 }

@@ -4,9 +4,9 @@ import UserNotifications
 @MainActor
 final class AppStore {
     private(set) var snapshot = EngineSnapshot()
-    var selectedIDs = Set<String>()
-    var filter: TaskFilter = .all
-    var searchText = ""
+    private(set) var selectedIDs = Set<String>()
+    private(set) var filter: TaskFilter = .all
+    private(set) var searchText = ""
     private(set) var settings: AppSettings
     var onChange: (() -> Void)?
     var onStatusChange: (() -> Void)?
@@ -28,25 +28,25 @@ final class AppStore {
         engine = try EngineService(profilePath: profile.appendingPathComponent("Session").path, settings: settings)
     }
 
-    var filteredTorrents: [TorrentSnapshot] {
-        snapshot.torrents.filter { filter.matches($0) && (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    private(set) var filteredTorrents: [TorrentSnapshot] = []
+    var selectedTorrent: TorrentSnapshot? { filteredTorrents.first { selectedIDs.contains($0.id) } }
+
+    private func reconcileSelection() {
+        filteredTorrents = TransferSelection.visible(torrents: snapshot.torrents, filter: filter, search: searchText)
+        selectedIDs = TransferSelection.reconcile(selectedIDs, visible: filteredTorrents)
     }
-    var selectedTorrent: TorrentSnapshot? { snapshot.torrents.first { selectedIDs.contains($0.id) } }
-    func select(ids: Set<String>) { selectedIDs = ids; onChange?() }
-    func setFilter(_ value: TaskFilter) { filter = value; onChange?() }
-    func setSearch(_ value: String) { searchText = value; onChange?() }
+    func select(ids: Set<String>) {
+        selectedIDs = TransferSelection.reconcile(ids, visible: filteredTorrents)
+        onChange?()
+    }
+    func setFilter(_ value: TaskFilter) { filter = value; reconcileSelection(); onChange?() }
+    func setSearch(_ value: String) { searchText = value; reconcileSelection(); onChange?() }
 
     func start() {
         polling = Task { [weak self] in
             guard let self else { return }
-            var tick = 0
             while !Task.isCancelled && !self.stopping {
                 await self.refresh()
-                tick += 1
-                if tick % 30 == 0 {
-                    do { try await self.engine.save() } catch { self.presentOnce(error.localizedDescription) }
-                }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -54,10 +54,12 @@ final class AppStore {
 
     private func refresh() async {
         do {
-            let next = try await engine.snapshot()
+            var next = try await engine.snapshot()
+            next.summary = TransferSummary(torrents: next.torrents)
+            let previous = Dictionary(uniqueKeysWithValues: snapshot.torrents.map { ($0.id, $0) })
             if settings.notifyOnCompletion {
                 for torrent in next.torrents where torrent.progress >= 1 {
-                    if let old = snapshot.torrents.first(where: { $0.id == torrent.id }), old.progress < 1 {
+                    if let old = previous[torrent.id], old.progress < 1 {
                         let content = UNMutableNotificationContent()
                         content.title = "下载完成"
                         content.body = torrent.name
@@ -67,7 +69,7 @@ final class AppStore {
             }
             snapshot = next
             onStatusChange?()
-            selectedIDs.formIntersection(Set(next.torrents.map(\.id)))
+            reconcileSelection()
             onChange?()
             for error in next.errors { presentOnce(error) }
         } catch { if !stopping { presentOnce(error.localizedDescription) } }
@@ -188,18 +190,15 @@ final class AppStore {
                 let previous = settings
                 let encoded = try JSONEncoder().encode(next)
                 try FileManager.default.createDirectory(atPath: next.downloadPath, withIntermediateDirectories: true)
-                try await engine.applySettings(next)
-                do {
+                let previousData = try JSONEncoder().encode(previous)
+                try await SettingsTransaction.commit {
                     try encoded.write(to: settingsURL, options: .atomic)
-                } catch {
-                    let persistenceError = error
-                    do { try await engine.applySettings(previous) }
-                    catch {
-                        settings = next
-                        onChange?()
-                        throw ClientError.message("设置未能写入磁盘，且无法恢复之前的引擎配置。当前运行配置已改变，请重试保存。\n\(persistenceError.localizedDescription)\n\(error.localizedDescription)")
-                    }
-                    throw persistenceError
+                } apply: {
+                    try await engine.applySettings(next)
+                } rollback: {
+                    // Restore persisted preferences even if restoring the engine fails.
+                    try previousData.write(to: settingsURL, options: .atomic)
+                    try await engine.applySettings(previous)
                 }
                 let requestNotifications = next.notifyOnCompletion && !previous.notifyOnCompletion
                 settings = next
@@ -212,13 +211,26 @@ final class AppStore {
         }
     }
 
+    func refreshDetail(id: String, completion: @escaping (TorrentSnapshot?, String?) -> Void) {
+        guard !stopping else { completion(nil, "下载引擎正在关闭。"); return }
+        Task {
+            do { completion(try await engine.detail(id: id), nil) }
+            catch { completion(nil, error.localizedDescription) }
+        }
+    }
     func showFiles() {
         guard let torrent = selectedTorrent else { return }
-        onPresent?(.files(torrent))
+        refreshDetail(id: torrent.id) { [weak self] detail, error in
+            if let detail { self?.onPresent?(.files(detail)) }
+            else if let error { self?.present(ClientError.message(error)) }
+        }
     }
     func showTrackers() {
         guard let torrent = selectedTorrent else { return }
-        onPresent?(.trackers(torrent))
+        refreshDetail(id: torrent.id) { [weak self] detail, error in
+            if let detail { self?.onPresent?(.trackers(detail)) }
+            else if let error { self?.present(ClientError.message(error)) }
+        }
     }
     func present(_ error: Error) {
         onPresent?(.message(title: "CBittorrent", body: error.localizedDescription))

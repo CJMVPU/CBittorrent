@@ -269,6 +269,21 @@ int main()
         {
             return state.get<int64_t>("totalDownloaded") >= static_cast<int64_t>(payload.size());
         });
+        auto readSnapshot = [](char *json)
+        {
+            require(json != nullptr, "Snapshot allocation failed");
+            std::istringstream stream(json);
+            cbt_string_free(json);
+            pt::ptree result;
+            pt::read_json(stream, result);
+            return result;
+        };
+        const auto lightweight = readSnapshot(cbt_engine_summary_json(download.get()));
+        require(firstTorrent(lightweight).get_child("files").empty(), "Summary unexpectedly includes file details");
+        require(firstTorrent(lightweight).get_child("trackers").empty(), "Summary unexpectedly includes tracker details");
+        const auto detail = readSnapshot(cbt_engine_detail_json(download.get(), id.c_str()));
+        require(firstTorrent(detail).get<std::string>("id") == id && !firstTorrent(detail).get_child("files").empty(),
+            "On-demand detail did not return the requested task files");
         call([&](char **error) { return cbt_engine_pause(download.get(), id.c_str(), error); });
         call([&](char **error) { return cbt_engine_set_file_priority(download.get(), id.c_str(), 0, 7, error); });
         apply(download.get(), R"({"queueEnabled":true,"maxActiveDownloads":2,"maxActiveUploads":3,"maxActiveTorrents":4})");
@@ -276,8 +291,23 @@ int main()
         require(settings(download.get()).get<int>("effective.activeDownloads") == 2, "Enabled queue limit not applied");
         apply(download.get(), R"({"queueEnabled":false})");
         require(firstTorrent(snapshot(download.get())).get<std::string>("state") == "paused", "Disabling queue resumed an explicitly paused task");
-        call([&](char **error) { return cbt_engine_save(download.get(), error); });
-        download.reset();
+        // Force resume-file writes to fail, then verify dirty-only retry actually writes state.
+        const fs::path resumeDirectory = root / "download-profile/ResumeData";
+        const fs::path savedResumeDirectory = root / "download-profile/ResumeData-backup";
+        fs::rename(resumeDirectory, savedResumeDirectory);
+        { std::ofstream blocker(resumeDirectory); blocker << "not a directory"; }
+        char *saveError = nullptr;
+        require(cbt_engine_flush(download.get(), &saveError) == 0, "Resume write failure was reported as success");
+        cbt_string_free(saveError);
+        readSnapshot(cbt_engine_detail_json(download.get(), id.c_str()));
+        require(!readSnapshot(cbt_engine_summary_json(download.get())).get_child("errors").empty(),
+            "Detail polling consumed a global persistence error");
+        fs::remove(resumeDirectory);
+        fs::rename(savedResumeDirectory, resumeDirectory);
+        fs::remove(resumeDirectory / (id + ".fastresume"));
+        call([&](char **error) { return cbt_engine_flush(download.get(), error); });
+        require(fs::is_regular_file(resumeDirectory / (id + ".fastresume")), "Dirty retry did not recreate persisted state");
+        cbt_engine_release(download.release());
         require(readFile(root / "download/payload.bin") == payload, "Downloaded payload differs from the seed");
         char *creationError = nullptr;
         download = Engine(cbt_engine_create_configured((root / "download-profile").c_str(),
@@ -308,6 +338,11 @@ int main()
         download = create(root / "download-profile");
         require(snapshot(download.get()).get_child("torrents").empty(), "Removed torrent returned after restart");
         require(readFile(root / "download/payload.bin") == payload, "Keep-files removal deleted data");
+        require(settings(download.get()).get<int>("bookkeeping.identities") == 0
+            && settings(download.get()).get<int>("bookkeeping.lookupEntries") == 0,
+            "Removed task retained its identity indexes");
+        require(cbt_engine_detail_json(download.get(), id.c_str()) == nullptr, "Removed task still returned details");
+        require(snapshot(download.get()).get_child("errors").empty(), "Stale detail request created a global error");
         error = nullptr;
         require(cbt_engine_add(download.get(), "magnet:?xt=urn:btih:not-a-valid-hash", (root / "download").c_str(), 0, &error) == 0,
             "Invalid magnet was accepted");
@@ -372,7 +407,7 @@ int main()
         download.reset();
         seed.reset();
         fs::remove_all(root);
-        std::cout << "PASS: loopback hybrid magnet metadata and payload transfer; stable IDs; pause/priority resume persistence; duplicate and invalid magnet rejection; resume; keep-files and delete-files removal survive restart; cumulative session traffic; validated settings apply/readback; startup settings; paused-task preservation; seeding ratio/time limits; tracker validation, automatic append, manual append, de-duplication and restart persistence\n";
+        std::cout << "PASS: loopback hybrid magnet metadata and payload transfer; stable IDs; pause/priority resume persistence; duplicate and invalid magnet rejection; resume; keep-files and delete-files removal survive restart; cumulative session traffic; validated settings apply/readback; startup settings; paused-task preservation; seeding ratio/time limits; tracker validation, automatic append, manual append, de-duplication and restart persistence; lightweight summaries; on-demand details; identity cleanup; dirty-save failure retry\n";
         return 0;
     }
     catch (const std::exception &error)

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(CBittorrent VERSION 0.4.1 LANGUAGES NONE)
+project(CBittorrent VERSION 0.5.0 LANGUAGES NONE)
 
 if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR
    NOT CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
@@ -31,5 +31,13 @@ if(BUILD_TESTING)
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/run_settings.sh"
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
-    set_tests_properties(native_engine native_settings PROPERTIES TIMEOUT 180)
+    add_test(NAME native_ui
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/run_ui.sh"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME native_packaging
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/packaging_test.py"
+    )
+    set_tests_properties(native_engine native_settings native_ui native_packaging PROPERTIES TIMEOUT 180)
 endif()

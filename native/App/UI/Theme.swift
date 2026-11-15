@@ -203,13 +203,27 @@ final class ActionButton: NSButton {
         ])
     }
 
+    /// Trim unused horizontal space while preserving the chosen layout edge.
+    func fitWidthToContent(keepingTrailingEdge: Bool = false) {
+        let hasImage = image != nil && imagePosition != .noImage
+        let hasTitle = !title.isEmpty && imagePosition != .imageOnly
+        let iconWidth = hasImage ? (font?.pointSize ?? 12) + 1 : 0
+        let gap: CGFloat = hasImage && hasTitle ? 6 : 0
+        let padding: CGFloat = hasTitle ? 20 : 12
+        let width = ceil((hasTitle ? attributedTitle.size().width : 0)
+                         + iconWidth + gap + padding)
+        let previousRight = frame.maxX
+        frame.size.width = min(frame.width, width)
+        if keepingTrailingEdge { frame.origin.x = previousRight - frame.width }
+    }
+
     func setTitle(_ text: String) { title = text; updateAppearance() }
     @objc private func performAction() { handler?() }
 }
 
 final class ProgressTrack: SurfaceView {
-    var progress: Double = 0 { didSet { needsDisplay = true } }
-    var tint = Titanium.accent { didSet { needsDisplay = true } }
+    var progress: Double = 0 { didSet { if oldValue != progress { needsDisplay = true } } }
+    var tint = Titanium.accent { didSet { if oldValue != tint { needsDisplay = true } } }
 
     override func draw(_ dirtyRect: NSRect) {
         Titanium.chrome.setFill()

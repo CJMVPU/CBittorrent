@@ -11,6 +11,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import fcntl
+import os
+from contextlib import contextmanager
 
 NATIVE = Path(__file__).resolve().parents[1]
 ROOT = NATIVE.parent
@@ -26,6 +30,112 @@ def output(arguments):
     return subprocess.check_output([str(value) for value in arguments], text=True).strip()
 
 
+def fingerprint(paths, identity):
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode())
+    for path in sorted(set(Path(value).resolve() for value in paths)):
+        digest.update(str(path).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def dependency_paths(path):
+    # Clang's Make dependencies escape spaces; shlex handles those escapes.
+    contents = path.read_text().replace("\\\n", "")
+    return [Path(value) for line in contents.splitlines() if ": " in line
+            for value in shlex.split(line.split(": ", 1)[1])]
+
+
+def cached_compile(command, source, destination, identity):
+    depfile = destination.with_suffix(".d")
+    stamp = destination.with_suffix(".json")
+    try:
+        inputs = dependency_paths(depfile)
+        expected = fingerprint(inputs, [identity, [str(arg) for arg in command]])
+        if destination.is_file() and json.loads(stamp.read_text()) == expected:
+            print(f"Cached object: {source.name}", flush=True)
+            return
+    except (OSError, ValueError, IndexError):
+        pass
+    # Invalidate before compiling: a failed compiler must never leave a valid stamp.
+    stamp.unlink(missing_ok=True)
+    run([*command, "-MD", "-MF", depfile, "-c", source, "-o", destination])
+    stamp.write_text(json.dumps(fingerprint(dependency_paths(depfile),
+                                           [identity, [str(arg) for arg in command]])))
+
+
+def cached_swift(command, sources, objects, libraries, cache_dir, identity):
+    executable = cache_dir / "CBittorrent-unsigned"
+    stamp = cache_dir / "swift-fingerprint.json"
+    file_map = cache_dir / "swift-output-map.json"
+    depfiles = [cache_dir / (source.stem + ".swift.d") for source in sources]
+    file_map.write_text(json.dumps({str(source): {"dependencies": str(depfile)}
+                                   for source, depfile in zip(sources, depfiles)}))
+    inputs = [*sources, *objects, *libraries, NATIVE / "Engine/CBTEngine.h"]
+    key_identity = [identity, [str(arg) for arg in command]]
+    try:
+        dependencies = [path for depfile in depfiles for path in dependency_paths(depfile)]
+        key = fingerprint(inputs + dependencies, key_identity)
+        if executable.is_file() and json.loads(stamp.read_text()) == key:
+            print("Cached Swift executable", flush=True)
+            return executable
+    except (OSError, ValueError, IndexError):
+        pass
+    stamp.unlink(missing_ok=True)
+    for depfile in depfiles:
+        depfile.unlink(missing_ok=True)
+    run([*command, "-emit-dependencies", "-track-system-dependencies",
+         "-disable-only-one-dependency-file",
+         "-output-file-map", file_map, "-o", executable])
+    # A compiler that cannot emit complete dependencies is safe but not cached.
+    if all(depfile.is_file() for depfile in depfiles):
+        dependencies = [path for depfile in depfiles for path in dependency_paths(depfile)]
+        stamp.write_text(json.dumps(fingerprint(inputs + dependencies, key_identity)))
+    return executable
+
+
+def linked_libraries(flags):
+    directories = [Path(flag[2:]) for flag in flags if flag.startswith("-L")]
+    result = []
+    for flag in flags:
+        if not flag.startswith("-l"):
+            continue
+        candidates = [directory / ("lib" + flag[2:] + suffix)
+                      for directory in directories for suffix in (".dylib", ".a")]
+        library = next((path for path in candidates if path.is_file()), None)
+        if library is None:
+            raise RuntimeError(f"Cannot fingerprint linked dependency: {flag}")
+        result.append(library)
+    return result
+
+
+@contextmanager
+def build_workspace(output_dir):
+    # Serialize writers to shared objects and the final bundle in this output folder.
+    with (output_dir / ".build.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with tempfile.TemporaryDirectory(prefix=".staging-", dir=output_dir) as staging:
+            yield Path(staging)
+
+
+def promote_bundle(staged, final):
+    backup = final.with_name(".CBittorrent.previous.app")
+    if backup.exists():
+        if not final.exists():
+            backup.rename(final)
+        else:
+            shutil.rmtree(backup)
+    if final.exists():
+        final.rename(backup)
+    try:
+        staged.rename(final)
+    except BaseException:
+        if backup.exists():
+            backup.rename(final)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
+
+
 def dependencies(binary):
     lines = output(["otool", "-L", binary]).splitlines()[1:]
     return [line.strip().split(" (", 1)[0] for line in lines]
@@ -33,7 +143,7 @@ def dependencies(binary):
 
 def rpaths(binary):
     lines = output(["otool", "-l", binary]).splitlines()
-    return [lines[index + 2].strip().split(" ")[1]
+    return [lines[index + 2].strip()[5:].rsplit(" (offset ", 1)[0]
             for index, line in enumerate(lines)
             if line.strip() == "cmd LC_RPATH"]
 
@@ -100,7 +210,7 @@ def package_libraries(executable, frameworks, search_paths):
     return sources
 
 
-def compile_app_icon(objects_dir, resources, plist_path):
+def generate_app_icon(objects_dir, resources, plist_path):
     """Give system-owned surfaces a real named app-icon asset, not just a Dock override."""
     catalog = objects_dir / "AppAssets.xcassets"
     if catalog.exists():
@@ -141,6 +251,31 @@ def compile_app_icon(objects_dir, resources, plist_path):
     info["CFBundleIconFile"] = fallback
     with plist_path.open("wb") as stream:
         plistlib.dump(info, stream, sort_keys=False)
+
+
+def compile_app_icon(objects_dir, resources, plist_path, identity):
+    cache = objects_dir / "icon-cache"
+    key = fingerprint([NATIVE / "Design/CB-app-icon.png", NATIVE / "Info.plist", Path(__file__)], identity)
+    stamp = cache / "fingerprint"
+    try:
+        cached = stamp.read_text() == key and (cache / "Assets.car").is_file()
+        with (cache / "Info.plist").open("rb") as stream:
+            cached_info = plistlib.load(stream)
+        cached = cached and (cache / cached_info["CFBundleIconFile"]).is_file()
+    except (OSError, ValueError, KeyError):
+        cached = False
+    if not cached:
+        shutil.rmtree(cache, ignore_errors=True)
+        cache.mkdir()
+        shutil.copy2(plist_path, cache / "Info.plist")
+        generate_app_icon(objects_dir, cache, cache / "Info.plist")
+        stamp.write_text(key)
+    else:
+        print("Cached icon catalog", flush=True)
+    for path in cache.iterdir():
+        if path.name not in ("fingerprint", "Info.plist"):
+            shutil.copy2(path, resources / path.name)
+    shutil.copy2(cache / "Info.plist", plist_path)
 
 
 def copy_licenses(sources, destination):
@@ -185,61 +320,71 @@ def main():
         cflags += ["-I" + output(["brew", "--prefix"]) + "/include"]
     output_dir = args.output.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    app = output_dir / "CBittorrent.app"
-    if app.exists():
-        shutil.rmtree(app)
-    contents = app / "Contents"
-    executable = contents / "MacOS/CBittorrent"
-    frameworks = contents / "Frameworks"
-    resources = contents / "Resources"
-    objects_dir = output_dir / "objects"
-    for directory in (executable.parent, frameworks, resources, objects_dir):
-        directory.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(NATIVE / "Info.plist", contents / "Info.plist")
-    shutil.copytree(NATIVE / "Resources", resources, dirs_exist_ok=True)
-    compile_app_icon(objects_dir, resources, contents / "Info.plist")
-    licenses = resources / "Licenses"
-    licenses.mkdir(exist_ok=True)
-    cxx = output(["xcrun", "--find", "clang++"])
-    swift = output(["xcrun", "--find", "swiftc"])
-    optimization = ["-O2", "-DNDEBUG"] if args.configuration == "release" else ["-O0", "-g"]
-    objects = []
-    engine_sources = sorted(list((NATIVE / "Engine").rglob("*.mm")) + list((NATIVE / "Engine").rglob("*.cpp")))
-    if not engine_sources:
-        parser.error("No native engine sources found.")
-    for source in engine_sources:
-        obj = objects_dir / (source.stem + "-" + hashlib.sha256(str(source).encode()).hexdigest()[:8] + ".o")
-        command = [cxx, "-std=c++20", "-arch", "arm64", f"-mmacosx-version-min={MINIMUM_MACOS}",
-                   "-isysroot", sdk, "-Wall", "-Wextra", *optimization, *cflags]
-        if source.suffix == ".mm":
-            command.append("-fobjc-arc")
-        run([*command, "-c", source, "-o", obj])
-        objects.append(obj)
-    swift_sources = sorted((NATIVE / "App").rglob("*.swift"))
-    swift_optimization = ["-O"] if args.configuration == "release" else ["-Onone", "-g"]
-    run([swift, "-swift-version", "5", "-target", "arm64-apple-macosx27.0", "-sdk", sdk,
-         "-module-name", "CBittorrent", *swift_optimization,
-         "-import-objc-header", NATIVE / "Engine/CBTEngine.h", *swift_sources, *objects,
-         *libs, "-lc++", "-framework", "Cocoa", "-framework", "CoreText",
-         "-framework", "UserNotifications", "-Xlinker", "-headerpad_max_install_names",
-         "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", executable])
-    search_paths = [flag[2:] for flag in libs if flag.startswith("-L")]
-    sources = package_libraries(executable, frameworks, search_paths)
-    copy_licenses(sources, licenses)
-    provenance = {
-        "macOSDeploymentTarget": MINIMUM_MACOS, "architecture": "arm64",
-        "sdk": sdk_version, "libtorrent": version,
-        "dependencies": [{"name": destination.name, "source": str(source),
-                          "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
-                         for source, destination in sources.items() if destination != executable]
-    }
-    (resources / "build-info.json").write_text(json.dumps(provenance, indent=2) + "\n")
-    for library in sorted(frameworks.iterdir()):
-        run(["codesign", "--force", "--sign", "-", library])
-    run(["codesign", "--force", "--sign", "-", app])
-    run([sys.executable, NATIVE / "scripts/audit_no_qt.py", app])
-    run(["codesign", "--verify", "--deep", "--strict", app])
-    print(f"\nBuilt {app}\nOpen with: open {shlex.quote(str(app))}")
+    with build_workspace(output_dir) as staging:
+        app = staging / "CBittorrent.app"
+        contents = app / "Contents"
+        executable = contents / "MacOS/CBittorrent"
+        frameworks = contents / "Frameworks"
+        resources = contents / "Resources"
+        objects_dir = output_dir / "objects"
+        for directory in (executable.parent, frameworks, resources, objects_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(NATIVE / "Info.plist", contents / "Info.plist")
+        shutil.copytree(NATIVE / "Resources", resources, dirs_exist_ok=True)
+        toolchain = [output(["xcodebuild", "-version"]), sdk, sdk_version,
+                     output(["xcrun", "clang++", "--version"]),
+                     output(["xcrun", "swiftc", "--version"]),
+                     str(Path(sdk).stat().st_mtime_ns),
+                     {key: os.environ.get(key) for key in ("CPATH", "CPLUS_INCLUDE_PATH",
+                      "C_INCLUDE_PATH", "OBJC_INCLUDE_PATH", "SDKROOT", "DEVELOPER_DIR")}]
+        compile_app_icon(objects_dir, resources, contents / "Info.plist", toolchain)
+        licenses = resources / "Licenses"
+        licenses.mkdir(exist_ok=True)
+        cxx = output(["xcrun", "--find", "clang++"])
+        swift = output(["xcrun", "--find", "swiftc"])
+        optimization = ["-O2", "-DNDEBUG"] if args.configuration == "release" else ["-O0", "-g"]
+        objects = []
+        engine_sources = sorted(list((NATIVE / "Engine").rglob("*.mm")) + list((NATIVE / "Engine").rglob("*.cpp")))
+        if not engine_sources:
+            parser.error("No native engine sources found.")
+        for source in engine_sources:
+            obj = objects_dir / (source.stem + "-" + hashlib.sha256(str(source).encode()).hexdigest()[:8] + ".o")
+            command = [cxx, "-std=c++20", "-arch", "arm64", f"-mmacosx-version-min={MINIMUM_MACOS}",
+                       "-isysroot", sdk, "-Wall", "-Wextra", *optimization, *cflags]
+            if source.suffix == ".mm":
+                command.append("-fobjc-arc")
+            cached_compile(command, source, obj, toolchain)
+            objects.append(obj)
+        swift_sources = sorted((NATIVE / "App").rglob("*.swift"))
+        swift_optimization = ["-O"] if args.configuration == "release" else ["-Onone", "-g"]
+        swift_command = [swift, "-swift-version", "5", "-target", "arm64-apple-macosx27.0", "-sdk", sdk,
+             "-module-name", "CBittorrent", *swift_optimization,
+             "-import-objc-header", NATIVE / "Engine/CBTEngine.h", *swift_sources, *objects,
+             *libs, "-lc++", "-framework", "Cocoa", "-framework", "CoreText",
+             "-framework", "UserNotifications", "-Xlinker", "-headerpad_max_install_names",
+             "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]
+        cached_executable = cached_swift(swift_command, swift_sources, objects,
+                                         linked_libraries(libs), objects_dir, toolchain)
+        shutil.copy2(cached_executable, executable)
+        search_paths = [flag[2:] for flag in libs if flag.startswith("-L")]
+        sources = package_libraries(executable, frameworks, search_paths)
+        copy_licenses(sources, licenses)
+        provenance = {
+            "macOSDeploymentTarget": MINIMUM_MACOS, "architecture": "arm64",
+            "sdk": sdk_version, "libtorrent": version,
+            "dependencies": [{"name": destination.name, "source": str(source),
+                              "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+                             for source, destination in sources.items() if destination != executable]
+        }
+        (resources / "build-info.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        for library in sorted(frameworks.iterdir()):
+            run(["codesign", "--force", "--sign", "-", library])
+        run(["codesign", "--force", "--sign", "-", app])
+        run([sys.executable, NATIVE / "scripts/audit_no_qt.py", app])
+        run(["codesign", "--verify", "--deep", "--strict", app])
+        final = output_dir / "CBittorrent.app"
+        promote_bundle(app, final)
+        print(f"\nBuilt {final}\nOpen with: open {shlex.quote(str(final))}")
 
 
 if __name__ == "__main__":

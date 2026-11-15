@@ -44,7 +44,7 @@ final class EngineService: @unchecked Sendable {
 
     func snapshot() async throws -> EngineSnapshot {
         try await perform { handle in
-            guard let json = cbt_engine_snapshot_json(handle) else {
+            guard let json = cbt_engine_summary_json(handle) else {
                 throw ClientError.message("无法读取下载任务。")
             }
             defer { cbt_string_free(json) }
@@ -94,11 +94,15 @@ final class EngineService: @unchecked Sendable {
         }
     }
 
-    func setLimits(download: Int, upload: Int) async throws {
+    func detail(id: String) async throws -> TorrentSnapshot {
         try await perform { handle in
-            var error: UnsafeMutablePointer<CChar>?
-            let result = cbt_engine_set_limits(handle, Int32(clamping: download), Int32(clamping: upload), &error)
-            try Self.check(result, error)
+            guard let json = id.withCString({ cbt_engine_detail_json(handle, $0) }) else {
+                throw ClientError.message("无法读取任务详情，任务可能已被移除。")
+            }
+            defer { cbt_string_free(json) }
+            let snapshot = try JSONDecoder().decode(EngineSnapshot.self, from: Data(String(cString: json).utf8))
+            guard let torrent = snapshot.torrents.first else { throw ClientError.message("任务已被移除。") }
+            return torrent
         }
     }
 
@@ -123,20 +127,20 @@ final class EngineService: @unchecked Sendable {
         }
     }
 
-    func save() async throws {
+    func save(all: Bool = false) async throws {
         try await perform { handle in
             var error: UnsafeMutablePointer<CChar>?
-            let result = cbt_engine_save(handle, &error)
+            let result = all ? cbt_engine_save(handle, &error) : cbt_engine_flush(handle, &error)
             try Self.check(result, error)
         }
     }
 
     func close() async throws {
         // Keep the engine alive when saving fails so the user can retry safely.
-        try await save()
+        try await save(all: true)
         await withCheckedContinuation { continuation in
             queue.async {
-                if let handle = self.handle { cbt_engine_destroy(handle) }
+                if let handle = self.handle { cbt_engine_release(handle) }
                 self.handle = nil
                 continuation.resume()
             }

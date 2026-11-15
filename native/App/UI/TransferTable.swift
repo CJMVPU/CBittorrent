@@ -80,9 +80,30 @@ final class MarqueeNameView: SurfaceView {
         addSubview(icon)
         addSubview(viewport)
         viewport.addSubview(nameLabel)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionPreferenceChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        nameLabel.layer?.removeAnimation(forKey: "name-scroll")
+        lastOverflow = -1
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        needsLayout = true
+    }
+
+    @objc private func motionPreferenceChanged() {
+        lastOverflow = -1
+        nameLabel.layer?.removeAnimation(forKey: "name-scroll")
+        needsLayout = true
+    }
 
     func update(_ value: String) {
         guard text != value else { return }
@@ -104,7 +125,7 @@ final class MarqueeNameView: SurfaceView {
         guard abs(overflow - lastOverflow) > 0.5 else { return }
         lastOverflow = overflow
         nameLabel.layer?.removeAnimation(forKey: "name-scroll")
-        guard overflow > 0, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        guard overflow > 0, !isHiddenOrHasHiddenAncestor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
         animation.values = [0, 0, -overflow, -overflow]
         animation.keyTimes = [0, 0.15, 0.85, 1]

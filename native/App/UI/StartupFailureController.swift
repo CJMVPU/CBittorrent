@@ -40,6 +40,7 @@ final class StartupFailureController: NSWindowController, NSWindowDelegate {
         surface.addSubview(body)
         let quit = ActionButton("退出", frame: NSRect(x: 760, y: 525, width: 100, height: 32)) { NSApp.terminate(nil) }
         quit.active = true
+        quit.fitWidthToContent(keepingTrailingEdge: true)
         surface.addSubview(quit)
         window.center()
     }

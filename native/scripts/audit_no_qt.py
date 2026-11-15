@@ -14,6 +14,42 @@ def output(arguments):
     return subprocess.check_output([str(value) for value in arguments], text=True).strip()
 
 
+def version_tuple(value):
+    parts = tuple(int(part) for part in value.split("."))
+    return parts + (0,) * (3 - len(parts))
+
+
+def validate_minimum_os(lines, path, minimum, executable=False):
+    versions = [line.strip().split()[1] for line in lines
+                if line.strip().startswith("minos ")]
+    if not versions:
+        for index, line in enumerate(lines):
+            if line.strip() == "cmd LC_VERSION_MIN_MACOSX":
+                versions.append(lines[index + 2].strip().split()[1])
+    if not versions or any(version_tuple(value) > version_tuple(minimum) for value in versions):
+        raise RuntimeError(f"Binary deployment target exceeds macOS {minimum} or is missing: {path}: {versions}")
+    if executable and any(version_tuple(value) != version_tuple(minimum) for value in versions):
+        raise RuntimeError(f"Executable deployment target must be {minimum}: {versions}")
+
+
+def resolve_load(name, loader, executable_dir, search_paths, app):
+    def expand(value):
+        return value.replace("@loader_path", str(loader.parent)).replace(
+            "@executable_path", str(executable_dir))
+    if name.startswith("@rpath/"):
+        candidates = [Path(directory) / name.removeprefix("@rpath/") for directory in search_paths]
+    elif name.startswith(("@loader_path/", "@executable_path/")):
+        candidates = [Path(expand(name))]
+    else:
+        raise RuntimeError(f"External dependency in {loader}: {name}")
+    for target in candidates:
+        if target.is_file():
+            if not target.resolve().is_relative_to(app):
+                raise RuntimeError(f"Dependency escapes bundle in {loader}: {name}")
+            return target.resolve()
+    raise RuntimeError(f"Unresolved dependency in {loader}: {name}")
+
+
 def audit(app):
     app = app.resolve()
     plist_path = app / "Contents/Info.plist"
@@ -22,8 +58,8 @@ def audit(app):
     if plist.get("LSMinimumSystemVersion") != "27.0":
         raise RuntimeError("The app must target macOS 27.0 and newer.")
     executable_dir = app / "Contents/MacOS"
-    frameworks = app / "Contents/Frameworks"
     binaries = []
+    graph = {}
     for path in sorted(app.rglob("*")):
         if not path.is_file():
             continue
@@ -33,34 +69,46 @@ def audit(app):
         architectures = output(["lipo", "-archs", path]).split()
         if architectures != ["arm64"]:
             raise RuntimeError(f"Non-arm64 binary: {path}: {architectures}")
+        lines = output(["otool", "-l", path]).splitlines()
+        validate_minimum_os(lines, path, "27.0", path == executable_dir / "CBittorrent")
+        paths = []
+        for index, line in enumerate(lines):
+            if line.strip() == "cmd LC_RPATH":
+                rpath = lines[index + 2].strip()[5:].rsplit(" (offset ", 1)[0]
+                expanded = rpath.replace("@loader_path", str(path.parent)).replace(
+                    "@executable_path", str(executable_dir))
+                if not Path(expanded).is_absolute() or not Path(expanded).resolve().is_relative_to(app):
+                    raise RuntimeError(f"External runtime search path in {path}: {rpath}")
+                paths.append(expanded)
         loads = output(["otool", "-L", path]).splitlines()[1:]
+        # otool lists LC_ID_DYLIB first; it is an identity, not a dependency.
+        if any(line.strip() == "cmd LC_ID_DYLIB" for line in lines):
+            loads = loads[1:]
+        names = []
         for line in loads:
             name = line.strip().split(" (", 1)[0]
             if re.search(r"(?:^|[/])(?:lib)?Qt", name, re.IGNORECASE):
                 raise RuntimeError(f"Qt dependency in {path}: {name}")
-            if name.startswith(("/usr/lib/", "/System/Library/")):
-                continue
-            if name.startswith("@rpath/"):
-                target = frameworks / name.removeprefix("@rpath/")
-            elif name.startswith("@loader_path/"):
-                target = path.parent / name.removeprefix("@loader_path/")
-            elif name.startswith("@executable_path/"):
-                target = executable_dir / name.removeprefix("@executable_path/")
-            else:
-                raise RuntimeError(f"External dependency in {path}: {name}")
-            if not target.exists() or not target.resolve().is_relative_to(app):
-                raise RuntimeError(f"Unbundled dependency in {path}: {name}")
-        lines = output(["otool", "-l", path]).splitlines()
-        if path == executable_dir / "CBittorrent":
-            min_versions = [line.strip().split()[1] for line in lines
-                            if line.strip().startswith("minos ")]
-            if min_versions != ["27.0"]:
-                raise RuntimeError(f"Executable deployment target must be 27.0: {min_versions}")
-        for index, line in enumerate(lines):
-            if line.strip() == "cmd LC_RPATH":
-                rpath = lines[index + 2].strip().split(" ")[1]
-                if rpath.startswith("/") and not rpath.startswith(("/usr/lib/", "/System/Library/")):
-                    raise RuntimeError(f"External runtime search path in {path}: {rpath}")
+            if not name.startswith(("/usr/lib/", "/System/Library/")):
+                names.append(name)
+        graph[path.resolve()] = (paths, names)
+    visited = set()
+    def visit(path, inherited):
+        if path in visited:
+            return
+        visited.add(path)
+        if path not in graph:
+            raise RuntimeError(f"Dependency is not an audited Mach-O: {path}")
+        own_paths, names = graph[path]
+        search_paths = own_paths + inherited
+        for name in names:
+            visit(resolve_load(name, path, executable_dir, search_paths, app), search_paths)
+    executable = executable_dir / "CBittorrent"
+    if executable.is_file():
+        visit(executable.resolve(), [])
+    for path in graph:
+        if path not in visited:
+            visit(path, [])
     if not binaries or not (executable_dir / "CBittorrent").is_file():
         raise RuntimeError("CBittorrent executable is missing.")
     icon_name = plist.get("CFBundleIconFile", "")

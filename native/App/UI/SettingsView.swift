@@ -51,6 +51,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         back.setTitle("返回传输")
         back.restingColor = Titanium.chrome
         back.tint = Titanium.text
+        back.fitWidthToContent()
         sidebar.addSubview(back)
         for page in Page.allCases {
             let button = ActionButton(page.title, symbol: page.symbol,
@@ -90,6 +91,9 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         saveButton.frame = NSRect(x: 746, y: 490, width: 134, height: 32)
         saveButton.active = true
         saveButton.handler = { [weak self] in self?.save() }
+        saveButton.fitWidthToContent(keepingTrailingEdge: true)
+        resetButton.fitWidthToContent()
+        resetButton.frame.origin.x = saveButton.frame.minX - 12 - resetButton.frame.width
         addSubview(saveButton)
         buildPages()
         restoreSavedValues()
@@ -266,9 +270,10 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
 
     private func makeInput(title: String, in view: NSView, y: CGFloat) -> NSTextField {
         let container = underlineContainer(in: view, y: y)
-        // Keep AppKit's normal cell/editor geometry. Padding belongs to the
-        // container, so entering edit mode cannot apply a different text inset.
+        // Display and editing share the same font-derived centered line rect.
         let field = NSTextField(frame: NSRect(x: 0, y: 4, width: inputWidth, height: 22))
+        field.cell = CenteredTextFieldCell(textCell: "")
+        field.isBezeled = false
         field.isEditable = true
         field.isSelectable = true
         field.font = Titanium.font(12)
@@ -445,6 +450,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         view.addSubview(apply)
         applyTrackersButton = apply
         let savedHint = Titanium.label("追加已保存列表，保留任务原有 Tracker。", size: 10, color: Titanium.muted)
+        apply.fitWidthToContent()
         savedHint.frame = NSRect(x: 196, y: y + 167, width: documentWidth - 214, height: 20)
         view.addSubview(savedHint)
         y += 206
@@ -488,6 +494,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         }
         choose.restingColor = Titanium.selection
         choose.tint = Titanium.accent
+        choose.fitWidthToContent()
         view.addSubview(choose)
         editableControls.append(choose)
         y += 52

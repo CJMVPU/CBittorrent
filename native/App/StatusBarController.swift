@@ -52,8 +52,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     func refresh() {
         let snapshot = store.snapshot
-        let downloading = snapshot.torrents.filter { TaskFilter.downloading.matches($0) }.count
-        let seeding = snapshot.torrents.filter { TaskFilter.seeding.matches($0) }.count
+        let downloading = snapshot.summary.count(for: .downloading)
+        let seeding = snapshot.summary.count(for: .seeding)
         summary.title = "\(snapshot.torrents.count) 个任务 · \(downloading) 下载 · \(seeding) 做种"
         rates.title = "↓ \(Titanium.bytes(snapshot.downloadRate))/s   ↑ \(Titanium.bytes(snapshot.uploadRate))/s"
         item.button?.toolTip = "CBittorrent\n\(summary.title)\n\(rates.title)"

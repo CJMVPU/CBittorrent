@@ -2,7 +2,7 @@ import Foundation
 
 @main
 struct SettingsTests {
-    static func main() throws {
+    static func main() async throws {
         func expect(_ condition: Bool, _ message: String) throws {
             if !condition { throw ClientError.message(message) }
         }
@@ -52,6 +52,37 @@ struct SettingsTests {
             _ = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"enableDHT":"yes"}"#.utf8))
             throw ClientError.message("Corrupt values were silently accepted")
         } catch is DecodingError { }
-        print("PASS: legacy settings migration, default values, normalization, persistence and invalid-input rejection")
+        let fixture = Data(#"{"id":"one","name":"Alpha","state":"downloading","progress":0.5,"totalSize":10,"downloaded":5,"uploaded":0,"downloadRate":1,"uploadRate":0,"eta":5,"ratio":0,"peers":2,"seeds":1,"savePath":"/tmp","error":"","files":[],"trackers":[]}"#.utf8)
+        let active = try JSONDecoder().decode(TorrentSnapshot.self, from: fixture)
+        var stopped = active
+        stopped.id = "two"; stopped.name = "Beta"; stopped.state = "paused"; stopped.peers = 0
+        let all = [active, stopped]
+        let visible = TransferSelection.visible(torrents: all, filter: .downloading, search: "")
+        try expect(TransferSelection.reconcile(["one", "two"], visible: visible) == ["one"], "Hidden tasks remained selected")
+        try expect(TransferSelection.reconcile(["one"], visible: TransferSelection.visible(torrents: all, filter: .all, search: "Beta")).isEmpty,
+                   "Search-hidden task remained selected")
+        let summary = TransferSummary(torrents: all)
+        try expect(summary.peerCount == 2 && summary.count(for: .all) == 2 && summary.count(for: .paused) == 1,
+                   "Shared transfer summary disagrees with filter semantics")
+        var applied = false
+        var rolledBack = false
+        do {
+            try await SettingsTransaction.commit {
+                throw ClientError.message("Simulated disk failure")
+            } apply: { applied = true } rollback: { rolledBack = true }
+            throw NSError(domain: "ExpectedDiskFailure", code: 1)
+        } catch is ClientError { }
+        try expect(!applied && !rolledBack, "Disk failure touched live task policy")
+        var persisted = "old"
+        do {
+            try await SettingsTransaction.commit { persisted = "new" } apply: {
+                throw ClientError.message("Simulated engine rejection")
+            } rollback: { persisted = "old" }
+            throw NSError(domain: "ExpectedEngineFailure", code: 1)
+        } catch is ClientError { }
+        try expect(persisted == "old", "Engine rejection did not restore persisted settings")
+        try await SettingsTransaction.commit { persisted = "new" } apply: { applied = true } rollback: { persisted = "old" }
+        try expect(applied && persisted == "new", "Successful settings transaction failed")
+        print("PASS: legacy settings migration, default values, normalization, persistence, invalid-input rejection, hidden selection, shared summaries and settings failure transactions")
     }
 }

@@ -14,13 +14,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private let settingsButton = ActionButton("设置", symbol: "slider.horizontal.3")
     private var settingsView: SettingsView!
     private var showingSettings = false
-    private var flows: [InWindowFlowView] = []
-    private var flowTokens: [UUID] = []
+    private struct FlowEntry { let token: UUID; let view: InWindowFlowView }
+    private var flows: [FlowEntry] = []
     private var refreshingSelection = false
     private var torrents: [TorrentSnapshot] = []
     private var statusLabels: [NSTextField] = []
     private var lastDiskCheck = Date.distantPast
     private var diskStatus = ""
+    private var checkingDisk = false
 
     init(store: AppStore) {
         self.store = store
@@ -60,27 +61,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
     private func clearFlows() {
-        flows.forEach { $0.removeFromSuperview() }
+        flows.forEach { $0.view.removeFromSuperview() }
         flows.removeAll()
-        flowTokens.removeAll()
     }
 
     func present(_ request: InWindowRequest) {
         window?.makeFirstResponder(nil)
-        flows.last?.isHidden = true
+        flows.last?.view.isHidden = true
         let token = UUID()
         let page = InWindowFlowView(request: request, store: store) { [weak self] in
-            guard let self, self.flowTokens.last == token else { return }
-            self.flowTokens.removeLast()
-            self.flows.popLast()?.removeFromSuperview()
-            if let previous = self.flows.last { previous.isHidden = false }
+            guard let self, self.flows.last?.token == token else { return }
+            self.flows.popLast()?.view.removeFromSuperview()
+            if let previous = self.flows.last { previous.view.isHidden = false }
             else if self.showingSettings { self.settingsView.isHidden = false }
             else { self.scrollView.isHidden = false }
             self.refresh()
         }
         page.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
-        flows.append(page)
-        flowTokens.append(token)
+        flows.append(FlowEntry(token: token, view: page))
         surface.addSubview(page)
         settingsView.isHidden = true
         scrollView.isHidden = true
@@ -230,7 +228,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         table.target = self
         table.doubleAction = #selector(revealSelection)
         let titles = ["名称", "进度", "状态", "剩余时间", "↓ 下载 /s", "↑ 上传 /s", "分享率", "大小"]
-        let widths: [CGFloat] = [230, 106, 72, 98, 94, 94, 74, 118]
+        let widths = TransferTableLayout.columnWidths(availableWidth: scrollView.contentSize.width)
         for (index, title) in titles.enumerated() {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(String(index)))
             column.width = widths[index]
@@ -241,7 +239,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             column.headerCell.alignment = index >= 3 ? .right : .left
             table.addTableColumn(column)
         }
-        table.frame = NSRect(x: 0, y: 0, width: 886, height: 516)
+        table.frame = NSRect(x: 0, y: 0, width: widths.reduce(0, +), height: 516)
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -269,17 +267,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         }
     }
 
-    private func count(_ filter: TaskFilter) -> Int {
-        store.snapshot.torrents.filter { torrent in
-            switch filter {
-            case .all: return true
-            case .downloading: return ["downloading", "metadata"].contains(torrent.state)
-            case .seeding: return torrent.state == "seeding"
-            case .paused: return torrent.state == "paused"
-            case .queued: return torrent.state == "queued"
-            }
-        }.count
-    }
+    private func count(_ filter: TaskFilter) -> Int { store.snapshot.summary.count(for: filter) }
 
     private func refresh() {
         let previousIDs = torrents.map(\.id)
@@ -315,17 +303,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         emptyLabel.stringValue = store.snapshot.torrents.isEmpty
             ? "添加种子文件或磁力链接，开始第一次传输。" : "没有匹配的任务"
         updateStatus()
+        flows.last?.view.refreshDetails()
     }
 
     private func updateStatus() {
         let snapshot = store.snapshot
-        let connections = snapshot.torrents.reduce(0) { $0 + $1.peers }
-        if Date().timeIntervalSince(lastDiskCheck) > 15 {
+        let connections = snapshot.summary.peerCount
+        if !checkingDisk && Date().timeIntervalSince(lastDiskCheck) > 15 {
+            checkingDisk = true
             lastDiskCheck = Date()
-            if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: store.settings.downloadPath),
-               let bytes = attributes[.systemFreeSize] as? NSNumber {
-                diskStatus = "\(Titanium.bytes(bytes.int64Value)) 可用"
-            } else { diskStatus = "磁盘空间不可用" }
+            let path = store.settings.downloadPath
+            FileSystemService.freeSpace(path: path) { [weak self] bytes in
+                guard let self else { return }
+                self.checkingDisk = false
+                guard self.store.settings.downloadPath == path else {
+                    self.lastDiskCheck = .distantPast
+                    return
+                }
+                self.diskStatus = bytes.map { "\(Titanium.bytes($0)) 可用" } ?? "磁盘空间不可用"
+            }
         }
         let values = [
             "\(count(.downloading)) 下载 · \(count(.seeding)) 做种",
@@ -336,8 +332,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             "DHT \(snapshot.dhtNodes)", diskStatus
         ]
         for (label, value) in zip(statusLabels, values) {
-            label.stringValue = value
-            label.toolTip = value
+            if label.stringValue != value {
+                label.stringValue = value
+                label.toolTip = value
+            }
         }
         statusLabels[1].toolTip = "当前所有任务的已连接 Peer 总数：\(connections)"
         statusLabels[4].toolTip = "本次会话：下载 \(Titanium.bytes(snapshot.totalDownloaded)) · 上传 \(Titanium.bytes(snapshot.totalUploaded))"
@@ -392,8 +390,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         case 7: text = Titanium.bytes(torrent.totalSize)
         default: text = ""
         }
-        cell.label.stringValue = text
-        cell.toolTip = text
+        if cell.label.stringValue != text {
+            cell.label.stringValue = text
+            cell.toolTip = text
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
