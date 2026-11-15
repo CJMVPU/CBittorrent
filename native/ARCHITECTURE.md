@@ -19,6 +19,8 @@ of this executable and is not reorganized by this refactor.
 The dependency direction is UI to Application to Domain. Infrastructure
 implements application ports; Composition knows the concrete implementations.
 The entry point retains process locking, OS open events and application lifetime.
+Runtime settings writes and download-directory preparation run off the main
+thread; use-case serialization still waits for them to finish before continuing.
 The filesystem browser remains a presentation utility with asynchronous I/O;
 it is independent of transfer and settings use cases.
 
@@ -67,6 +69,24 @@ only transitions from incomplete to complete. The initial snapshot is a baseline
 Notification delivery and authorization use an injectable port. Aggregate counts
 and peer totals are computed in one pass. Transfer sorting breaks equal-name ties
 by stable ID so refreshes do not shuffle equal-name rows.
+
+## Engine adapter components
+
+The C ABI is unchanged. Its implementation is separated into independently
+compiled responsibilities so library updates do not require editing one large
+session-and-UI-contract file:
+
+- `CBTEngine.mm`: C command facade, locking, ownership and exception translation.
+- `EngineSession.h` / `.mm`: internal session aggregate, identities, task policy,
+  alert processing and resume-save lifecycle. Definitions stay out of the header.
+- `EngineConfiguration.h` / `.mm`: input validation and libtorrent settings mapping.
+- `EngineQueries.mm`: summary, detail and effective-settings JSON projections.
+- `EngineSupport.h` / `.mm`: C string ownership, identity/state mapping and atomic
+  resume-file writes.
+
+Internal headers are not imported into Swift. Both production and integration
+builds compile all adapter translation units; C ABI ownership and the existing
+loopback regression suite remain the compatibility gates.
 
 ## Extending features
 

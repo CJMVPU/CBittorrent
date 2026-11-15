@@ -2,9 +2,9 @@ import Foundation
 
 /// Persist before applying policy, so a disk failure cannot stop live tasks.
 enum SettingsTransaction {
-    static func commit(persist: () throws -> Void, apply: () async throws -> Void,
+    static func commit(persist: () async throws -> Void, apply: () async throws -> Void,
                        rollback: () async throws -> Void) async throws {
-        try persist()
+        try await persist()
         do { try await apply() }
         catch {
             let original = error

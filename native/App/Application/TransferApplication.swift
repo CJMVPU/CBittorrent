@@ -100,7 +100,7 @@ final class TransferApplication {
             var failure: String?
             do {
                 try await persistMutation {
-                    try directory.prepare(path: settings.downloadPath)
+                    try await directory.prepare(path: settings.downloadPath)
                     for source in sources {
                         try await engine.add(source: source, savePath: settings.downloadPath, paused: settings.addPaused)
                         accepted.append(source)
@@ -123,15 +123,15 @@ final class TransferApplication {
         try await serialized { [self] in
             let next = try value.validated()
             let previous = settings
-            try directory.prepare(path: next.downloadPath)
+            try await directory.prepare(path: next.downloadPath)
             try await SettingsTransaction.commit {
-                try repository.save(next)
+                try await repository.save(next)
             } apply: {
                 try await engine.applySettings(next)
             } rollback: {
                 // Attempt both recoveries, even when disk restoration fails.
                 var diskFailure: Error?
-                do { try repository.save(previous) } catch { diskFailure = error }
+                do { try await repository.save(previous) } catch { diskFailure = error }
                 do { try await engine.applySettings(previous) }
                 catch {
                     if let diskFailure {

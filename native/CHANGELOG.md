@@ -3,6 +3,20 @@
 Historical behavior is recorded below; use [README.md](README.md) for the
 current specification and [VALIDATION.md](VALIDATION.md) for dated checks.
 
+## 0.6.0 — Domain and adapter boundaries
+
+- Route task operations, settings transactions and graceful shutdown through
+  injectable application ports; serialize complete use cases across awaits.
+- Separate domain policy, application orchestration, infrastructure and UI.
+- Split the libtorrent adapter into command, session, configuration, query and
+  support components while preserving the C ABI and saved profile format.
+- Move runtime settings writes and download-directory creation off the UI thread.
+- Persist partial batch successes, recover both settings stores after rejection,
+  validate file priorities and stabilize equal-name task ordering.
+- Render complete long filenames using a dedicated text layer and preserve
+  animation phase across unchanged snapshots.
+- Enforce dependency boundaries and exercise failure/shutdown paths in CI.
+
 ## 0.5.0 — State, UI and build refactoring
 
 - Reconcile selection with visible tasks and fit all transfer columns inside the

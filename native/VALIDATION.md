@@ -300,3 +300,30 @@ was removed or replaced by the isolated UI test profile.
   claimed. Geometry and selection regressions passed in the automated harness.
 - This record covers local acceptance. GitHub Actions results belong to the
   pushed commit and must be checked separately.
+
+## 0.6.0 — Domain and engine boundaries (2026-11-15)
+
+- Split the native executable into domain, application, infrastructure,
+  presentation and composition responsibilities. Split the C engine adapter into
+  command, session, configuration, query and support translation units without
+  changing the public C header or existing profile formats.
+- Release build, six existing CTest groups, strict signature/dependency audits
+  and ZIP extraction round trip passed. The additional concrete asynchronous
+  storage test passed separately and is registered as the seventh CTest group.
+- Application tests cover partial acceptance, simultaneous operation/save errors,
+  settings rollback, completion transitions, draining shutdown and shutdown retry.
+  Storage tests cover real temporary-file round trips, write failure, corrupt
+  settings and invalid directory destinations. UI tests include the previously
+  uncommitted marquee rendering/lifecycle regression.
+- Installed 0.6.0 (11) at `/Applications/CBittorrent.app` after graceful quit.
+  The installed bundle exactly matched the verified Release bundle and passed
+  strict signing. All three profile files were byte-identical across replacement.
+  Installation did not write downloaded payloads.
+- Native accessibility confirmed restoration of the existing completed task in
+  seeding state, active upload counters, settings navigation and return to the
+  transfer view. No user task or preference was changed for acceptance.
+- The current release archive and installation/check receipts are retained under
+  `build/release-0.6.0/`. Older build-log and screenshot paths in historical
+  sections describe past checks, not permanently retained artifacts.
+- Architecture changes do not establish a public tracker throughput benchmark or
+  eliminate the need to review future upstream semantic changes.

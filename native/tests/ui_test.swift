@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 @main
 struct UITest {
@@ -9,6 +10,7 @@ struct UITest {
         precondition(widths.count == 8 && widths.allSatisfy { $0 > 0 })
         precondition(widths.reduce(0, +) == 888, "Every column must fit the fixed viewport")
         precondition(widths[0] >= 200, "Keep the name usable in the compact window")
+        testMarquee()
 
         let list = FlowListView(frame: NSRect(x: 0, y: 0, width: 844, height: 278))
         list.strings = ["0% A", "0% B"]
@@ -36,6 +38,67 @@ struct UITest {
             FileSystemService.list(directory.appendingPathComponent("missing")) { continuation.resume(returning: $0) }
         }
         if case .success = failure { preconditionFailure("Missing folder must report failure") }
-        print("PASS: UI geometry, stable detail selection, asynchronous filesystem success/failure")
+        print("PASS: UI geometry, marquee rendering/lifecycle, stable detail selection, asynchronous filesystem success/failure")
+    }
+
+    @MainActor
+    private static func testMarquee() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 304, height: 24),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let name = MarqueeNameView()
+        window.contentView = name
+        let longName = String(repeating: "Long filename ", count: 8) + "END.mkv"
+        name.update(longName)
+        name.layoutSubtreeIfNeeded()
+        let viewport = name.subviews[1]
+        guard let textLayer = viewport.layer?.sublayers?.compactMap({ $0 as? CATextLayer }).first else {
+            preconditionFailure("The marquee must render the entire name independently of AppKit view clipping")
+        }
+        precondition(name.toolTip == longName)
+        precondition(viewport.layer?.masksToBounds == true)
+        let overflow = textLayer.bounds.width - viewport.bounds.width
+        precondition(overflow > 0)
+
+        // The suffix starts outside the initial viewport. It must already have
+        // pixels before animation reveals it, rather than scrolling into blank backing.
+        let width = Int(ceil(textLayer.bounds.width))
+        let height = Int(ceil(textLayer.bounds.height))
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        textLayer.displayIfNeeded()
+        textLayer.render(in: context)
+        let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+        let suffixHasInk = (0..<height).contains { y in
+            ((width - 45)..<width).contains { x in pixels[(y * width + x) * 4 + 3] > 0 }
+        }
+        precondition(suffixHasInk, "The end of a long filename must be drawn outside the initial viewport")
+
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let animation = textLayer.animation(forKey: "name-scroll")!.copy() as! CAKeyframeAnimation
+            let offsets = (animation.values as! [NSNumber]).map(\.doubleValue)
+            precondition(offsets.min() == -Double(overflow) && offsets.max() == 0,
+                         "Scroll only between the fully aligned start and end")
+            precondition(animation.autoreverses && animation.repeatCount == .infinity)
+            animation.beginTime = CACurrentMediaTime() - 2
+            textLayer.add(animation, forKey: "name-scroll")
+            name.update(longName)
+            name.needsLayout = true
+            name.layoutSubtreeIfNeeded()
+            precondition(textLayer.animation(forKey: "name-scroll")?.beginTime == animation.beginTime,
+                         "Unchanged snapshots must preserve the scroll phase")
+            name.isHidden = true
+            precondition(textLayer.animation(forKey: "name-scroll") == nil)
+            name.isHidden = false
+            name.layoutSubtreeIfNeeded()
+            precondition(textLayer.animation(forKey: "name-scroll") != nil)
+        }
+
+        name.update("2026")
+        name.layoutSubtreeIfNeeded()
+        precondition(textLayer.animation(forKey: "name-scroll") == nil,
+                     "Reusing a long-name cell for a short name must stop scrolling")
+        precondition(textLayer.frame.minX == 0 && textLayer.frame.width == viewport.bounds.width)
+        precondition(name.toolTip == "2026")
     }
 }

@@ -20,10 +20,15 @@ common_flags=(-std=c++20 -arch arm64 -mmacosx-version-min=27.0 -isysroot "${sdk_
     -I"${boost_prefix}/include" -I"${project_root}/native/Engine")
 
 mkdir -p "${test_build}"
-"${compiler}" "${common_flags[@]}" "${torrent_cflags[@]}" -fobjc-arc \
-    -c "${project_root}/native/Engine/CBTEngine.mm" -o "${test_build}/CBTEngine.o"
+engine_objects=()
+for source in "${project_root}"/native/Engine/*.mm; do
+    object="${test_build}/$(basename "${source}" .mm).o"
+    "${compiler}" "${common_flags[@]}" "${torrent_cflags[@]}" -fobjc-arc \
+        -c "${source}" -o "${object}"
+    engine_objects+=("${object}")
+done
 "${compiler}" "${common_flags[@]}" "${torrent_cflags[@]}" \
-    "${project_root}/native/tests/engine_smoke.cpp" "${test_build}/CBTEngine.o" \
+    "${project_root}/native/tests/engine_smoke.cpp" "${engine_objects[@]}" \
     "${torrent_libraries[@]}" -framework Foundation -o "${test_build}/engine_smoke"
 
 # The executable creates its own /tmp fixture and binds both sessions to loopback.

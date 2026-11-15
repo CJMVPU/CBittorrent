@@ -67,7 +67,9 @@ final class TransferRowView: NSTableRowView {
 final class MarqueeNameView: SurfaceView {
     private let icon = NSImageView()
     private let viewport = SurfaceView()
-    private let nameLabel = Titanium.label(size: 12)
+    // Own the animated layer: AppKit may only draw the visible portion of a
+    // layer-backed NSTextField, leaving blank text when its layer moves.
+    private let nameLayer = CATextLayer()
     private var text = ""
     private var lastOverflow: CGFloat = -1
 
@@ -76,10 +78,11 @@ final class MarqueeNameView: SurfaceView {
         icon.image = NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
         icon.contentTintColor = Titanium.muted
         viewport.layer?.masksToBounds = true
-        nameLabel.wantsLayer = true
+        nameLayer.alignmentMode = .left
+        nameLayer.isWrapped = false
         addSubview(icon)
         addSubview(viewport)
-        viewport.addSubview(nameLabel)
+        viewport.layer?.addSublayer(nameLayer)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionPreferenceChanged),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
     }
@@ -90,7 +93,7 @@ final class MarqueeNameView: SurfaceView {
 
     override func viewDidHide() {
         super.viewDidHide()
-        nameLabel.layer?.removeAnimation(forKey: "name-scroll")
+        nameLayer.removeAnimation(forKey: "name-scroll")
         lastOverflow = -1
     }
 
@@ -99,16 +102,34 @@ final class MarqueeNameView: SurfaceView {
         needsLayout = true
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        lastOverflow = -1
+        nameLayer.removeAnimation(forKey: "name-scroll")
+        needsLayout = true
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsLayout = true
+    }
+
     @objc private func motionPreferenceChanged() {
         lastOverflow = -1
-        nameLabel.layer?.removeAnimation(forKey: "name-scroll")
+        nameLayer.removeAnimation(forKey: "name-scroll")
         needsLayout = true
     }
 
     func update(_ value: String) {
         guard text != value else { return }
         text = value
-        nameLabel.stringValue = value
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        nameLayer.string = NSAttributedString(string: value, attributes: [
+            .font: Titanium.font(12), .foregroundColor: Titanium.text
+        ])
+        CATransaction.commit()
+        nameLayer.removeAnimation(forKey: "name-scroll")
         toolTip = value
         setAccessibilityLabel(value)
         lastOverflow = -1
@@ -120,20 +141,26 @@ final class MarqueeNameView: SurfaceView {
         icon.frame = NSRect(x: 9, y: (bounds.height - 13) / 2, width: 13, height: 13)
         viewport.frame = NSRect(x: 29, y: 0, width: max(0, bounds.width - 38), height: bounds.height)
         let textWidth = ceil((text as NSString).size(withAttributes: [.font: Titanium.font(12)]).width) + 2
-        nameLabel.frame = NSRect(x: 0, y: (bounds.height - 18) / 2, width: max(textWidth, viewport.bounds.width), height: 18)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        nameLayer.contentsScale = window?.backingScaleFactor ?? 2
+        nameLayer.frame = NSRect(x: 0, y: (bounds.height - 18) / 2,
+                                width: max(textWidth, viewport.bounds.width), height: 18)
+        CATransaction.commit()
         let overflow = max(0, textWidth - viewport.bounds.width)
         guard abs(overflow - lastOverflow) > 0.5 else { return }
         lastOverflow = overflow
-        nameLabel.layer?.removeAnimation(forKey: "name-scroll")
-        guard overflow > 0, !isHiddenOrHasHiddenAncestor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        nameLayer.removeAnimation(forKey: "name-scroll")
+        guard overflow > 0, viewport.bounds.width > 0, window != nil,
+              !isHiddenOrHasHiddenAncestor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
-        animation.values = [0, 0, -overflow, -overflow]
+        animation.values = [0.0, 0.0, -Double(overflow), -Double(overflow)]
         animation.keyTimes = [0, 0.15, 0.85, 1]
         animation.duration = max(5, Double(overflow) / 22 + 2)
         animation.autoreverses = true
         animation.repeatCount = .infinity
         animation.timingFunctions = [.init(name: .linear), .init(name: .easeInEaseOut), .init(name: .linear)]
-        nameLabel.layer?.add(animation, forKey: "name-scroll")
+        nameLayer.add(animation, forKey: "name-scroll")
     }
 }
 

@@ -44,7 +44,11 @@ The old Qt-related CMake options are not part of this build.
 - `App/main.swift`: process locking and app lifecycle.
 - `App/UI/`: native AppKit interface, embedded pages and background filesystem service.
 - `Engine/CBTEngine.h`: ownership-explicit C API imported into Swift.
-- `Engine/CBTEngine.mm`: libtorrent session, commands, snapshots and resume data.
+- `Engine/CBTEngine.mm`: C command facade and ownership.
+- `Engine/EngineSession.mm`: session aggregate and resume lifecycle.
+- `Engine/EngineConfiguration.mm`: settings validation and library mapping.
+- `Engine/EngineQueries.mm`: summary/detail projections.
+- `Engine/EngineSupport.mm`: identity/state mapping and atomic storage primitives.
 - `Resources/Fonts/`: unmodified LXGW WenKai Mono Medium 1.522 and its OFL.
 - `scripts/build_native.py`: compilation, dylib relocation, notices, signing.
 - `scripts/audit_no_qt.py`: independent Mach-O dependency audit.
@@ -109,6 +113,7 @@ peers, with DHT, trackers, local discovery and router traffic disabled:
 ```sh
 ./native/tests/run.sh
 ./native/tests/run_application.sh
+./native/tests/run_storage.sh
 python3 native/tests/architecture_test.py
 ./native/tests/run_settings.sh
 ./native/tests/run_ui.sh

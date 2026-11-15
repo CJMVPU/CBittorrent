@@ -11,8 +11,8 @@
     <key>CFBundleIconFile</key><string>CBittorrent.icns</string>
     <key>CFBundleIconName</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.5.0</string>
-    <key>CFBundleVersion</key><string>10</string>
+    <key>CFBundleShortVersionString</key><string>0.6.0</string>
+    <key>CFBundleVersion</key><string>11</string>
     <key>LSMinimumSystemVersion</key><string>27.0</string>
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>
     <key>LSRequiresNativeExecution</key><true/>

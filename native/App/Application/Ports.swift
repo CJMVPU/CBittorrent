@@ -18,12 +18,12 @@ protocol TransferEngine: AnyObject {
 @MainActor
 protocol SettingsRepository {
     func load() throws -> AppSettings
-    func save(_ settings: AppSettings) throws
+    func save(_ settings: AppSettings) async throws
 }
 
 @MainActor
 protocol DownloadDirectory {
-    func prepare(path: String) throws
+    func prepare(path: String) async throws
 }
 
 @MainActor
