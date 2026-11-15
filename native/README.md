@@ -265,3 +265,26 @@ explicit saves/shutdown. An abrupt crash can lose traffic since the last success
 checkpoint. Corrupt history is preserved and reported instead of silently reset.
 Peer diagnostics also show whether the remote peer is interested in our data;
 connection count alone does not establish current upload demand.
+
+## Download-before-confirmation metadata check (0.8.0)
+
+All application entry points (Add, dropped `.torrent` files, Finder open and
+magnet URL open) lead to metadata review. Review shows the name, total metadata
+size, info hash, file paths/sizes and the configured destination. Batches are
+reviewed one source at a time; Confirm adds that task, Skip advances, and Back
+cancels unconfirmed work. Existing add-paused and queue preferences apply only
+after confirmation. Metadata describes content; it does not certify safety,
+authenticity or availability of the payload.
+
+Magnet previews contact peers using `upload_mode`, `default_dont_download` and
+manual management. They request metadata without requesting payload, use isolated
+scratch storage, remain outside normal task snapshots and never write resume
+files. Confirmation transfers the inspected metadata into a normal torrent at
+the actual destination. Cancellation removes the transient handle; abandoned
+scratch directories are cleared at the next launch. Fetching times out after
+120 seconds with a retry option. Returning or navigating away cancels the pending
+preview. Previously confirmed items remain in the task list.
+
+The lower-level add API remains available for engine tests and internal use; UI
+entry points must use the application metadata use cases. This follows
+[libtorrent's metadata-only upload-mode contract](https://www.libtorrent.org/reference-Session.html).

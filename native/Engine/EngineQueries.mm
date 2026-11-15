@@ -45,7 +45,11 @@ static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includ
                 ? std::vector<lt::torrent_handle>{engine->find(selectedID)} : engine->session.get_torrents();
             for (const lt::torrent_handle &handle : handles)
             {
+                if (!selectedID && engine->metadataPreviews.contains(engine->torrentID(handle))) continue;
                 const lt::torrent_status status = handle.status();
+                const auto metadata = handle.torrent_file();
+                const int64_t totalSize = engine->metadataPreviews.contains(engine->torrentID(handle)) && metadata
+                    ? metadata->layout().total_size() : status.total_wanted;
                 const int64_t remaining = std::max<int64_t>(0, status.total_wanted - status.total_wanted_done);
                 const int64_t eta = status.is_finished ? 0 : (status.download_payload_rate > 0 ? remaining / status.download_payload_rate : -1);
                 const int64_t ratioBytes = status.all_time_download > 0 ? status.all_time_download : status.total_wanted;
@@ -123,12 +127,12 @@ static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includ
                     }
                 }
                 [torrents addObject:@{@"id": stringValue(engine->torrentID(handle)), @"name": stringValue(status.name),
-                    @"state": stringValue(stateName(status)), @"progress": @(status.progress), @"totalSize": @(status.total_wanted),
+                    @"state": stringValue(stateName(status)), @"progress": @(status.progress), @"totalSize": @(totalSize),
                     @"downloaded": @(status.total_wanted_done), @"uploaded": @(status.all_time_upload),
                     @"downloadRate": @(status.download_payload_rate), @"uploadRate": @(status.upload_payload_rate),
                     @"eta": @(eta), @"ratio": @(ratio), @"peers": @(status.num_peers), @"seeds": @(status.num_seeds),
                     @"savePath": stringValue(status.save_path), @"error": stringValue(status.errc ? status.errc.message() : ""),
-                    @"files": files, @"trackers": trackers, @"connections": connections}];
+                    @"metadataReady": @(status.has_metadata), @"files": files, @"trackers": trackers, @"connections": connections}];
                 downloadRate += status.download_payload_rate;
                 uploadRate += status.upload_payload_rate;
             }

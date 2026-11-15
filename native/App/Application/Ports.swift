@@ -5,6 +5,9 @@ protocol TransferEngine: AnyObject {
     func snapshot() async throws -> EngineSnapshot
     func detail(id: String) async throws -> TorrentSnapshot
     func add(source: String, savePath: String, paused: Bool) async throws
+    func prepareMetadata(source: String) async throws -> String
+    func cancelMetadata(id: String) async throws
+    func confirmMetadata(id: String, savePath: String, paused: Bool) async throws
     func pause(id: String) async throws
     func resume(id: String) async throws
     func remove(id: String, deleteFiles: Bool) async throws
@@ -30,4 +33,11 @@ protocol DownloadDirectory {
 protocol CompletionNotifier {
     func requestAuthorization() async
     func completed(_ torrent: TorrentSnapshot) async
+}
+
+// Unsupported adapters fail explicitly; production implements all preview operations.
+extension TransferEngine {
+    func prepareMetadata(source: String) async throws -> String { throw ClientError.message("不支持元数据预览。") }
+    func cancelMetadata(id: String) async throws {}
+    func confirmMetadata(id: String, savePath: String, paused: Bool) async throws { throw ClientError.message("不支持元数据预览。") }
 }

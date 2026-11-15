@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <libtorrent/session.hpp>
+#include <libtorrent/add_torrent_params.hpp>
 #import <Foundation/Foundation.h>
 
 namespace lt = libtorrent;
@@ -42,6 +43,7 @@ struct CBTEngine
     fs::path resumePath;
     lt::session session;
     NSDictionary *configuration;
+    std::map<std::string, lt::add_torrent_params> metadataPreviews;
     std::set<lt::torrent_handle> pendingSaves;
     std::set<lt::torrent_handle> dirtyHandles;
     std::map<lt::torrent_handle, std::string> torrentIDs;

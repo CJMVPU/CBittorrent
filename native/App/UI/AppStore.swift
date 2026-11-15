@@ -65,9 +65,7 @@ final class AppStore {
     }
 
     func add(sources: [String]) {
-        addFromForm(sources: sources) { [weak self] _, error in
-            if let error { self?.present(ClientError.message(error)) }
-        }
+        onPresent?(.review(sources))
     }
 
     /// Reports accepted sources so a partially successful batch is not submitted twice.
@@ -81,6 +79,11 @@ final class AppStore {
             } catch { completion([], error.localizedDescription) }
         }
     }
+
+    func prepareMetadata(source: String) async throws -> String { try await application.prepareMetadata(source: source) }
+    func metadataDetail(id: String) async throws -> TorrentSnapshot { try await application.detail(id: id) }
+    func cancelMetadata(id: String) async { try? await application.cancelMetadata(id: id) }
+    func confirmMetadata(id: String) async throws { try await application.confirmMetadata(id: id); await refresh() }
 
     func addTorrentPrompt() { onPresent?(.add) }
 

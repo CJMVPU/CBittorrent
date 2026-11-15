@@ -250,6 +250,51 @@ int main()
         const auto params = lt::load_torrent_file(torrentPath.string());
         // v1-only magnet for a hybrid torrent exercises stable IDs after metadata arrives.
         const std::string magnet = std::regex_replace(lt::make_magnet_uri(params), std::regex("&xt=urn:btmh:[^&]*"), "");
+        // Preview must fetch real magnet metadata without any payload or persistence.
+        {
+            auto preview = create(root / "preview-profile");
+            char *previewID = nullptr;
+            call([&](char **error) { return cbt_engine_prepare_metadata(preview.get(), magnet.c_str(), &previewID, error); });
+            const std::string pendingID(previewID);
+            cbt_string_free(previewID);
+            require(snapshot(preview.get()).get_child("torrents").empty(), "Preview leaked into task list");
+            call([&](char **error) { return cbt_engine_connect_peer(preview.get(), pendingID.c_str(), "127.0.0.1", seedPort, error); });
+            auto detail = [&]()
+            {
+                char *json = cbt_engine_detail_json(preview.get(), pendingID.c_str());
+                require(json != nullptr, "Preview detail unavailable");
+                std::istringstream stream(json);
+                cbt_string_free(json);
+                pt::ptree value;
+                pt::read_json(stream, value);
+                return firstTorrent(value);
+            };
+            const auto deadline = std::chrono::steady_clock::now() + 20s;
+            while (!detail().get<bool>("metadataReady") && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(100ms);
+            require(detail().get<bool>("metadataReady"), "Magnet preview failed to retrieve metadata");
+            require(detail().get<int64_t>("totalSize") == static_cast<int64_t>(payload.size()), "Preview total size must include deselected payload");
+            require(detail().get_child("files").size() == 1, "Preview omitted file list");
+            apply(preview.get(), R"({"queueEnabled":true})");
+            std::this_thread::sleep_for(1500ms);
+            require(snapshot(preview.get()).get<int64_t>("totalDownloaded") == 0, "Preview downloaded payload before confirmation");
+            call([&](char **error) { return cbt_engine_save(preview.get(), error); });
+            require(fs::is_empty(root / "preview-profile/ResumeData"), "Unconfirmed preview persisted");
+            call([&](char **error) { return cbt_engine_confirm_metadata(preview.get(), pendingID.c_str(), (root / "preview-confirmed").c_str(), 1, error); });
+            require(firstTorrent(snapshot(preview.get())).get<std::string>("state") == "paused", "Confirmation ignored add-paused");
+            require(firstTorrent(snapshot(preview.get())).get<std::string>("savePath") == (root / "preview-confirmed").string(), "Confirmation used temporary destination");
+            preview.reset();
+            preview = create(root / "preview-profile");
+            require(!snapshot(preview.get()).get_child("torrents").empty(), "Confirmed task did not persist");
+            auto cancelled = create(root / "cancelled-preview-profile");
+            previewID = nullptr;
+            call([&](char **error) { return cbt_engine_prepare_metadata(cancelled.get(), torrentPath.c_str(), &previewID, error); });
+            call([&](char **error) { return cbt_engine_cancel_metadata(cancelled.get(), previewID, error); });
+            cbt_string_free(previewID);
+            cancelled.reset();
+            cancelled = create(root / "cancelled-preview-profile");
+            require(snapshot(cancelled.get()).get_child("torrents").empty(), "Cancelled preview restored after restart");
+        }
         call([&](char **error) { return cbt_engine_add(download.get(), magnet.c_str(), (root / "download").c_str(), 0, error); });
         const std::string id = firstTorrent(snapshot(download.get())).get<std::string>("id");
         const auto taskSettings = settings(download.get()).get_child("torrents").front().second;

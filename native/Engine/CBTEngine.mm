@@ -100,9 +100,9 @@ void cbt_engine_release(CBTEngine *engine)
     delete engine;
 }
 
-int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, int paused, char **error)
+namespace
 {
-    return perform(engine, error, [&](CBTEngine &state)
+    lt::add_torrent_params additionParameters(CBTEngine &state, const char *source, const char *savePath, int paused)
     {
         const std::string input = requiredString(source, "Torrent source");
         const fs::path destination = fs::absolute(requiredString(savePath, "Save path"));
@@ -143,9 +143,86 @@ int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, 
         {
             params.flags &= ~lt::torrent_flags::paused;
         }
-        lt::torrent_handle handle = state.session.add_torrent(std::move(params), failure);
+        return params;
+    }
+
+    void forgetPreview(CBTEngine &state, const std::string &id)
+    {
+        if (!state.metadataPreviews.contains(id))
+            return;
+        const auto handle = state.find(id.c_str());
+        state.session.remove_torrent(handle, lt::session::delete_files);
+        state.torrentIDs.erase(handle);
+        state.handlesByID.erase(id);
+        state.metadataPreviews.erase(id);
+    }
+}
+
+int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, int paused, char **error)
+{
+    return perform(engine, error, [&](CBTEngine &state)
+    {
+        auto params = additionParameters(state, source, savePath, paused);
+        lt::error_code failure;
+        const auto handle = state.session.add_torrent(std::move(params), failure);
         if (failure)
             throw std::runtime_error(failure.message());
+        state.torrentID(handle);
+        state.requestSave(handle);
+    });
+}
+
+int cbt_engine_prepare_metadata(CBTEngine *engine, const char *source, char **previewID, char **error)
+{
+    if (previewID) *previewID = nullptr;
+    return perform(engine, error, [&](CBTEngine &state)
+    {
+        if (!previewID) throw std::invalid_argument("Missing preview output");
+        const auto temporary = state.profilePath / "MetadataPreviews" / [NSUUID UUID].UUIDString.UTF8String;
+        auto params = additionParameters(state, source, temporary.c_str(), 0);
+        params.storage_mode = lt::storage_mode_sparse;
+        params.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+        params.flags |= lt::torrent_flags::upload_mode | lt::torrent_flags::default_dont_download;
+        params.file_priorities.clear();
+        lt::error_code failure;
+        const auto handle = state.session.add_torrent(params, failure);
+        if (failure) throw std::runtime_error(failure.message());
+        const auto id = state.torrentID(handle);
+        state.metadataPreviews.emplace(id, std::move(params));
+        *previewID = copyString(id);
+    });
+}
+
+int cbt_engine_cancel_metadata(CBTEngine *engine, const char *previewID, char **error)
+{
+    return perform(engine, error, [&](CBTEngine &state)
+    {
+        forgetPreview(state, requiredString(previewID, "Preview ID"));
+    });
+}
+
+int cbt_engine_confirm_metadata(CBTEngine *engine, const char *previewID, const char *savePath, int paused, char **error)
+{
+    return perform(engine, error, [&](CBTEngine &state)
+    {
+        const auto id = requiredString(previewID, "Preview ID");
+        if (!state.metadataPreviews.contains(id)) throw std::runtime_error("Metadata preview no longer exists");
+        const auto info = state.find(previewID).torrent_file();
+        if (!info) throw std::runtime_error("Metadata is not available yet");
+        const auto destination = fs::absolute(requiredString(savePath, "Save path"));
+        fs::create_directories(destination);
+        auto params = state.metadataPreviews.at(id);
+        params.ti = std::make_shared<lt::torrent_info>(*info);
+        params.save_path = destination.string();
+        params.flags &= ~(lt::torrent_flags::upload_mode | lt::torrent_flags::default_dont_download | lt::torrent_flags::paused | lt::torrent_flags::auto_managed);
+        if (paused) params.flags |= lt::torrent_flags::paused;
+        else if ([state.configuration[@"queueEnabled"] boolValue]) params.flags |= lt::torrent_flags::auto_managed;
+        params.storage_mode = [state.configuration[@"preallocateFiles"] boolValue] ? lt::storage_mode_allocate : lt::storage_mode_sparse;
+        state.configureParameters(params);
+        forgetPreview(state, id);
+        lt::error_code failure;
+        const auto handle = state.session.add_torrent(std::move(params), failure);
+        if (failure) throw std::runtime_error(failure.message());
         state.torrentID(handle);
         state.requestSave(handle);
     });

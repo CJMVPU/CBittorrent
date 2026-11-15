@@ -162,3 +162,10 @@ A local clean reinstall preserves the complete application support profile.
 - Import recoverable legacy resume totals once; preserve corrupt history for
   recovery instead of silently resetting it.
 - Show remote peer interest alongside choking state to help inspect idle uploads.
+
+## 0.8.0 (14)
+
+- Inspect torrent names, sizes, hashes and file lists before confirming downloads.
+- Resolve magnets without payload requests, with timeout, retry, cancellation and
+  sequential batch review. Unconfirmed previews are neither listed nor restored.
+- Route system-open and form additions through the same review workflow.

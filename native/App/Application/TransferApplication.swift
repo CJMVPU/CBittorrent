@@ -94,6 +94,23 @@ final class TransferApplication {
         }
     }
 
+    func prepareMetadata(source: String) async throws -> String {
+        try await serialized { [self] in try await engine.prepareMetadata(source: source) }
+    }
+
+    func cancelMetadata(id: String) async throws {
+        try await serialized { [self] in try await engine.cancelMetadata(id: id) }
+    }
+
+    func confirmMetadata(id: String) async throws {
+        try await serialized { [self] in
+            try await directory.prepare(path: settings.downloadPath)
+            try await persistMutation {
+                try await engine.confirmMetadata(id: id, savePath: settings.downloadPath, paused: settings.addPaused)
+            }
+        }
+    }
+
     func add(sources: [String]) async throws -> AddTransfersResult {
         try await serialized { [self] in
             var accepted: [String] = []

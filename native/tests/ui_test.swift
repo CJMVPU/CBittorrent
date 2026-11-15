@@ -24,6 +24,7 @@ struct UITest {
         precondition(StatusBarPresentation.ratio(traffic) == "0.25", "Ratio must use history, not session totals")
         testMarquee()
         try testConnectionPageAndSettings()
+        try await testMetadataReview()
 
         let list = FlowListView(frame: NSRect(x: 0, y: 0, width: 844, height: 278))
         list.strings = ["0% A", "0% B"]
@@ -104,6 +105,32 @@ struct UITest {
     }
 
     @MainActor
+    private static func testMetadataReview() async throws {
+        let engine = UIPreviewEngine()
+        let fixture = Data(#"{"id":"preview","name":"Metadata fixture","state":"metadata","progress":0,"totalSize":1024,"downloaded":0,"uploaded":0,"downloadRate":0,"uploadRate":0,"eta":0,"ratio":0,"peers":0,"seeds":0,"savePath":"/tmp","error":"","files":[],"trackers":[],"metadataReady":true}"#.utf8)
+        engine.metadata = try JSONDecoder().decode(TorrentSnapshot.self, from: fixture)
+        let effects = UIPreviewEffects()
+        let store = AppStore(application: TransferApplication(engine: engine, repository: effects,
+            directory: effects, notifier: effects, settings: AppSettings()))
+        var finished = false
+        let view = MetadataReviewView(sources: ["fixture"], store: store) { finished = true }
+        let button = view.subviews.compactMap { $0 as? ActionButton }.first { $0.title == "确认添加" }!
+        precondition(!button.isEnabled && engine.confirmations == 0)
+        for _ in 0..<100 where !button.isEnabled { try await Task.sleep(nanoseconds: 10_000_000) }
+        precondition(button.isEnabled && engine.confirmations == 0, "Metadata must require explicit confirmation")
+        button.performClick(nil)
+        for _ in 0..<100 where !finished { try await Task.sleep(nanoseconds: 10_000_000) }
+        precondition(finished && engine.confirmations == 1)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 541))
+        let page = InWindowFlowView(request: .review(["cancelled"]), store: store, onClose: {})
+        container.addSubview(page)
+        await Task.yield()
+        page.removeFromSuperview()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        precondition(engine.confirmations == 1 && engine.activePreviews.isEmpty, "Leaving preview must clean up late async results")
+    }
+
+    @MainActor
     private static func testMarquee() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 304, height: 24),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -166,8 +193,20 @@ struct UITest {
 }
 
 private final class UIPreviewEngine: TransferEngine {
+    var metadata: TorrentSnapshot?
+    var confirmations = 0
+    var activePreviews = Set<String>()
+    func prepareMetadata(source: String) async throws -> String {
+        try await Task.sleep(nanoseconds: 30_000_000)
+        activePreviews.insert(source)
+        return source
+    }
+    func cancelMetadata(id: String) async throws { activePreviews.remove(id) }
+    func confirmMetadata(id: String, savePath: String, paused: Bool) async throws {
+        confirmations += 1; activePreviews.remove(id)
+    }
     func snapshot() async throws -> EngineSnapshot { EngineSnapshot() }
-    func detail(id: String) async throws -> TorrentSnapshot { throw ClientError.message("Missing fixture") }
+    func detail(id: String) async throws -> TorrentSnapshot { guard let metadata else { throw ClientError.message("Missing fixture") }; return metadata }
     func add(source: String, savePath: String, paused: Bool) async throws {}
     func pause(id: String) async throws {}
     func resume(id: String) async throws {}

@@ -3,6 +3,7 @@ import AppKit
 /// Every application-owned interaction is a page inside the existing window.
 enum InWindowRequest {
     case add
+    case review([String])
     case remove(ids: Set<String>)
     case files(TorrentSnapshot)
     case trackers(TorrentSnapshot)
@@ -21,6 +22,7 @@ final class InWindowFlowView: SurfaceView {
     private var sourceEditor: NSTextView?
     private var browser: InlineFileBrowser?
     private var detailView: TorrentDetailView?
+    private var metadataView: MetadataReviewView?
     private var peerView: PeerDetailView?
 
     init(request: InWindowRequest, store: AppStore, onClose: @escaping () -> Void) {
@@ -35,6 +37,11 @@ final class InWindowFlowView: SurfaceView {
         addSubview(feedback)
         switch request {
         case .add: buildAdd()
+        case .review(let sources):
+            heading("下载前检查", subtitle: "先查看名称、大小和文件列表，再决定是否添加。返回会取消尚未确认的项目。")
+            let view = MetadataReviewView(sources: sources, store: store, finish: onClose)
+            metadataView = view
+            addSubview(view)
         case .remove(let ids): buildRemove(ids)
         case .files(let torrent): buildFiles(torrent)
         case .trackers(let torrent): buildTrackers(torrent)
@@ -63,6 +70,11 @@ final class InWindowFlowView: SurfaceView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil { metadataView?.cancel() }
+        super.viewWillMove(toSuperview: newSuperview)
+    }
 
     private func heading(_ title: String, subtitle: String) {
         let name = Titanium.label(title, size: 20)
@@ -144,7 +156,7 @@ final class InWindowFlowView: SurfaceView {
         let state = Titanium.label(store.settings.addPaused ? "新任务将以停止状态加入" : "新任务将按队列设置开始传输", size: 11, color: Titanium.muted)
         state.frame = NSRect(x: 214, y: 396, width: 638, height: 24)
         addSubview(state)
-        button("添加任务", symbol: "plus", frame: NSRect(x: 730, y: 493, width: 142, height: 32)) { [weak self] in self?.submitSources() }.active = true
+        button("检查元数据", symbol: "plus", frame: NSRect(x: 730, y: 493, width: 142, height: 32)) { [weak self] in self?.submitSources() }.active = true
     }
 
     private func appendSources(_ urls: [URL]) {
@@ -152,7 +164,7 @@ final class InWindowFlowView: SurfaceView {
         let additions = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "torrent" }.map(\.path)
         let current = editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
         editor.string = ([current].filter { !$0.isEmpty } + additions).joined(separator: "\n")
-        showFeedback("已选择 \(additions.count) 个种子文件；点击添加任务开始导入。")
+        showFeedback("已选择 \(additions.count) 个种子文件；点击检查元数据开始预览。")
     }
 
     private func submitSources() {
@@ -179,16 +191,8 @@ final class InWindowFlowView: SurfaceView {
                 if !sources.contains(source) { sources.append(source) }
             }
             guard !sources.isEmpty else { throw ClientError.message("先输入磁力链接，或选择种子文件。") }
-            setBusy(true)
-            showFeedback("正在添加任务…")
-            store.addFromForm(sources: sources) { [weak self] accepted, error in
-                guard let self else { return }
-                self.setBusy(false)
-                if let error {
-                    self.sourceEditor?.string = sources.filter { !accepted.contains($0) }.joined(separator: "\n")
-                    self.showFeedback("已加入 \(accepted.count) 个任务。\(error)", error: true)
-                } else { self.onClose() }
-            }
+            sourceEditor?.string = ""
+            store.add(sources: sources)
         } catch { showFeedback(error.localizedDescription, error: true) }
     }
 

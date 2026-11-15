@@ -374,3 +374,20 @@ was removed or replaced by the isolated UI test profile.
   public inbound reachability or the cause of each idle peer. Screenshot capture
   returned a distorted window, so visual pixel-level acceptance is not claimed.
 - Evidence and installation receipt: `build/release-0.7.1/`.
+
+## 0.8.0 — Metadata review before download (2026-11-15)
+
+- Full release verification passed all seven CTest groups, arm64/no-Qt audit,
+  strict signing and ZIP round trip. The loopback test retrieves actual magnet
+  metadata with zero payload bytes, including after a queue-settings change.
+  Preview total size/files, hidden task listing, no resume persistence,
+  confirmation destination/add-paused behavior and cancellation restart are tested.
+- Application tests verify previews do not save transfers and confirmed tasks do.
+  UI tests verify explicit confirmation and cancellation of late async results
+  when a review page is removed. Unsupported metadata operations fail explicitly.
+- Installed 0.8.0 (14) matches the verified build. Profile files were byte-identical
+  across replacement. Native UI acceptance displayed a local private fixture's
+  name, 1.2 KiB total, hash, destination and file list; screenshot layout was
+  inspected. Returning cancelled the preview, retaining the three existing tasks.
+  No fixture was confirmed or added to the user's transfer list.
+- Artifacts, verification log and installation receipt: `build/release-0.8.0/`.

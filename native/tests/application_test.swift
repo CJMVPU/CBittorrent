@@ -17,6 +17,9 @@ final class FakeEngine: TransferEngine {
     func snapshot() async throws -> EngineSnapshot { try await record("snapshot"); return value }
     func detail(id: String) async throws -> TorrentSnapshot { throw ClientError.message("missing") }
     func add(source: String, savePath: String, paused: Bool) async throws { try await record("add:\(source)") }
+    func prepareMetadata(source: String) async throws -> String { try await record("preview:\(source)"); return "preview-id" }
+    func cancelMetadata(id: String) async throws { try await record("cancel:\(id)") }
+    func confirmMetadata(id: String, savePath: String, paused: Bool) async throws { try await record("confirm:\(id)") }
     func pause(id: String) async throws { try await record("pause:\(id)") }
     func resume(id: String) async throws { try await record("resume:\(id)") }
     func remove(id: String, deleteFiles: Bool) async throws { try await record("remove:\(id):\(deleteFiles)") }
@@ -66,6 +69,15 @@ struct ApplicationTests {
         let app = TransferApplication(engine: engine, repository: repository,
             directory: effects, notifier: effects, settings: settings)
 
+        let pendingID = try await app.prepareMetadata(source: "magnet:test")
+        try expect(engine.calls == ["preview:magnet:test"], "Preview must not save a transfer")
+        engine.calls = []
+        try await app.confirmMetadata(id: pendingID)
+        try expect(engine.calls == ["confirm:preview-id", "save"], "Confirmed preview must persist")
+        engine.calls = []
+        try await app.cancelMetadata(id: pendingID)
+        try expect(engine.calls == ["cancel:preview-id"], "Cancel must not add or save a task")
+        engine.calls = []
         engine.rejected = ["add:bad"]
         let result = try await app.add(sources: ["good", "bad", "never"])
         try expect(result.accepted == ["good"] && result.failure != nil, "Partial addition lost accepted sources")

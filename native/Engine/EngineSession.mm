@@ -44,6 +44,7 @@ CBTEngine::CBTEngine(const fs::path &profile, NSDictionary *configured)
     fs::create_directories(resumePath);
     ::chmod(profilePath.c_str(), 0700);
     ::chmod(resumePath.c_str(), 0700);
+    fs::remove_all(profilePath / "MetadataPreviews");
     restore();
     restoreStatistics();
     for (const lt::torrent_handle &handle : session.get_torrents())
@@ -187,16 +188,22 @@ void CBTEngine::configureTorrent(const lt::torrent_handle &handle)
 {
     const lt::torrent_status status = handle.status();
     const bool queue = [configuration[@"queueEnabled"] boolValue];
-    if (!queue && (status.flags & lt::torrent_flags::auto_managed))
+    const bool preview = metadataPreviews.contains(torrentID(handle));
+    if (!preview && !queue && (status.flags & lt::torrent_flags::auto_managed))
     {
         handle.unset_flags(lt::torrent_flags::auto_managed);
         handle.resume();
     }
-    else if (queue && !(status.flags & lt::torrent_flags::paused))
+    else if (!preview && queue && !(status.flags & lt::torrent_flags::paused))
     {
         handle.set_flags(lt::torrent_flags::auto_managed);
     }
     // A manually paused task stays paused when unrelated settings change.
+    if (metadataPreviews.contains(torrentID(handle)))
+    {
+        handle.unset_flags(lt::torrent_flags::auto_managed);
+        handle.set_flags(lt::torrent_flags::upload_mode | lt::torrent_flags::default_dont_download);
+    }
     const auto mask = lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download;
     handle.set_flags(policyFlags(), mask);
     handle.set_max_connections(connectionLimit());
@@ -225,6 +232,7 @@ void CBTEngine::enforceSeedLimits()
         return;
     for (const lt::torrent_handle &handle : session.get_torrents())
     {
+        if (metadataPreviews.contains(torrentID(handle))) continue;
         const lt::torrent_status status = handle.status();
         if (!status.is_finished || (status.flags & lt::torrent_flags::paused))
             continue;
@@ -308,11 +316,13 @@ void CBTEngine::processAlerts()
 
 void CBTEngine::requestSave(const lt::torrent_handle &handle)
 {
+    if (metadataPreviews.contains(torrentID(handle))) return;
     dirtyHandles.insert(handle);
 }
 
 void CBTEngine::queueSave(const lt::torrent_handle &handle)
 {
+    if (metadataPreviews.contains(torrentID(handle))) return;
     torrentID(handle);
     if (pendingSaves.insert(handle).second)
     {

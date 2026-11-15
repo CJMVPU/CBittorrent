@@ -21,6 +21,10 @@ char *cbt_engine_snapshot_json(CBTEngine *engine);
 char *cbt_engine_summary_json(CBTEngine *engine);
 // Same snapshot envelope, containing only the requested task with details.
 char *cbt_engine_detail_json(CBTEngine *engine, const char *torrentID);
+// Preview IDs are caller-owned strings. Previews never persist or request payload.
+int cbt_engine_prepare_metadata(CBTEngine *engine, const char *source, char **previewID, char **error);
+int cbt_engine_cancel_metadata(CBTEngine *engine, const char *previewID, char **error);
+int cbt_engine_confirm_metadata(CBTEngine *engine, const char *previewID, const char *savePath, int paused, char **error);
 int cbt_engine_add(CBTEngine *engine, const char *source, const char *savePath, int paused, char **error);
 int cbt_engine_pause(CBTEngine *engine, const char *torrentID, char **error);
 int cbt_engine_resume(CBTEngine *engine, const char *torrentID, char **error);

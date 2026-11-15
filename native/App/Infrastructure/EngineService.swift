@@ -62,6 +62,36 @@ final class EngineService: TransferEngine, @unchecked Sendable {
         }
     }
 
+    func prepareMetadata(source: String) async throws -> String {
+        try await perform { handle in
+            var error: UnsafeMutablePointer<CChar>?
+            var identifier: UnsafeMutablePointer<CChar>?
+            let result = source.withCString { cbt_engine_prepare_metadata(handle, $0, &identifier, &error) }
+            defer { if let identifier { cbt_string_free(identifier) } }
+            try Self.check(result, error)
+            guard let identifier else { throw ClientError.message("无法创建元数据预览。") }
+            return String(cString: identifier)
+        }
+    }
+
+    func cancelMetadata(id: String) async throws {
+        try await perform { handle in
+            var error: UnsafeMutablePointer<CChar>?
+            let result = id.withCString { cbt_engine_cancel_metadata(handle, $0, &error) }
+            try Self.check(result, error)
+        }
+    }
+
+    func confirmMetadata(id: String, savePath: String, paused: Bool) async throws {
+        try await perform { handle in
+            var error: UnsafeMutablePointer<CChar>?
+            let result = id.withCString { identifier in
+                savePath.withCString { cbt_engine_confirm_metadata(handle, identifier, $0, paused ? 1 : 0, &error) }
+            }
+            try Self.check(result, error)
+        }
+    }
+
     func pause(id: String) async throws {
         try await perform { handle in
             var error: UnsafeMutablePointer<CChar>?

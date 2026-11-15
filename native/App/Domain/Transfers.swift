@@ -34,6 +34,7 @@ struct TorrentSnapshot: Codable, Identifiable {
     var files: [TorrentFileSnapshot]
     var trackers: [TrackerSnapshot]
     var connections: [PeerSnapshot]?
+    var metadataReady: Bool?
 }
 
 struct EngineSnapshot: Codable {
