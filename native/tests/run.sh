@@ -28,7 +28,7 @@ for source in "${project_root}"/native/Engine/*.mm; do
     engine_objects+=("${object}")
 done
 "${compiler}" "${common_flags[@]}" "${torrent_cflags[@]}" \
-    "${project_root}/native/tests/engine_smoke.cpp" "${engine_objects[@]}" \
+    "${project_root}/native/tests/engine_smoke.cpp" "${project_root}/native/tests/upload_interop.cpp" "${engine_objects[@]}" \
     "${torrent_libraries[@]}" -framework Foundation -o "${test_build}/engine_smoke"
 
 # The executable creates its own /tmp fixture and binds both sessions to loopback.

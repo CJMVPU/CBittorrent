@@ -26,6 +26,8 @@ namespace pt = boost::property_tree;
 using namespace std::chrono_literals;
 using Engine = std::unique_ptr<CBTEngine, decltype(&cbt_engine_destroy)>;
 
+void checkUploadInterop(const fs::path &root);
+
 namespace
 {
     void require(bool condition, const std::string &message)
@@ -505,6 +507,7 @@ int main()
         require(readFile(migrationProfile / "statistics.json") == "corrupt", "Corrupt history overwritten");
         download.reset();
         seed.reset();
+        checkUploadInterop(root / "upload-comparison");
         fs::remove_all(root);
         std::cout << "PASS: loopback hybrid magnet metadata and payload transfer; stable IDs; pause/priority resume persistence; duplicate and invalid magnet rejection; resume; keep-files and delete-files removal survive restart; cumulative session traffic; validated settings apply/readback; startup settings; paused-task preservation; seeding ratio/time limits; tracker validation, automatic append, manual append, de-duplication and restart persistence; lightweight summaries; on-demand details; identity cleanup; dirty-save failure retry\n";
         return 0;
