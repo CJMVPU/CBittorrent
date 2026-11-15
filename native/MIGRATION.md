@@ -11,8 +11,8 @@ backend. The upstream sources remain in this repository as reference material.
 | --- | --- | --- |
 | `src/base/bittorrent/sessionimpl.cpp` | `Engine/CBTEngine.mm` | Session creation, active download/seed queues, rate limits, alerts and cumulative session counters |
 | `src/base/bittorrent/torrentimpl.cpp` | `Engine/CBTEngine.mm` | Add, explicit pause/resume, status, file priorities, remove and resume persistence |
-| `src/gui/addnewtorrentdialog.cpp` | `App/AppStore.swift`, `App/UI/InWindowFlowView.swift` | In-window local torrent and magnet input, default destination, add-paused preference |
-| `src/gui/transferlistmodel.cpp` and `transferlistwidget.cpp` | `App/Models.swift`, `App/UI/MainWindowController.swift`, `TransferTable.swift` | Fixed-width list, state filters, search, selection and live metrics |
+| `src/gui/addnewtorrentdialog.cpp` | `App/Application/TransferApplication.swift`, `App/UI/AppStore.swift`, `App/UI/InWindowFlowView.swift` | In-window local torrent and magnet input, default destination, add-paused preference |
+| `src/gui/transferlistmodel.cpp` and `transferlistwidget.cpp` | `App/Domain/Transfers.swift`, `App/UI/MainWindowController.swift`, `TransferTable.swift` | Fixed-width list, state filters, search, selection and live metrics |
 | `src/gui/properties/propertieswidget.cpp` | `App/UI/MainWindowController.swift`, `App/UI/InWindowFlowView.swift` | In-window task action menu, files/priorities, configured Tracker list; floating inspector removed in 0.3 |
 | `src/gui/optionsdialog.cpp` | `App/UI/SettingsView.swift` | Same-window download location, rate limits, close behavior and completion notifications |
 

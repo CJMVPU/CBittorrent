@@ -24,6 +24,8 @@ open build/native/CBittorrent.app
 
 The build bundles dependencies and signs the app ad hoc.
 See [native documentation](native/README.md) for details and validation.
+The [architecture guide](native/ARCHITECTURE.md) describes domain boundaries
+and the upstream integration workflow.
 
 ## Workflow
 

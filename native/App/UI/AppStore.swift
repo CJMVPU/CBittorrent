@@ -1,5 +1,4 @@
-import AppKit
-import UserNotifications
+import Foundation
 
 @MainActor
 final class AppStore {
@@ -7,25 +6,18 @@ final class AppStore {
     private(set) var selectedIDs = Set<String>()
     private(set) var filter: TaskFilter = .all
     private(set) var searchText = ""
-    private(set) var settings: AppSettings
+    var settings: AppSettings { application.settings }
     var onChange: (() -> Void)?
     var onStatusChange: (() -> Void)?
     var onPresent: ((InWindowRequest) -> Void)?
-    private let engine: EngineService
-    private let settingsURL: URL
+    private let application: TransferApplication
     private var polling: Task<Void, Never>?
     private var shownErrors = Set<String>()
     private var stopping = false
     private var savingSettings = false
 
-    init(profile: URL) throws {
-        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
-        settingsURL = profile.appendingPathComponent("settings.json")
-        if FileManager.default.fileExists(atPath: settingsURL.path) {
-            settings = try JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: settingsURL))
-        } else { settings = AppSettings() }
-        settings = try settings.validated()
-        engine = try EngineService(profilePath: profile.appendingPathComponent("Session").path, settings: settings)
+    init(application: TransferApplication) {
+        self.application = application
     }
 
     private(set) var filteredTorrents: [TorrentSnapshot] = []
@@ -43,6 +35,7 @@ final class AppStore {
     func setSearch(_ value: String) { searchText = value; reconcileSelection(); onChange?() }
 
     func start() {
+        guard polling == nil else { return }
         polling = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled && !self.stopping {
@@ -54,19 +47,7 @@ final class AppStore {
 
     private func refresh() async {
         do {
-            var next = try await engine.snapshot()
-            next.summary = TransferSummary(torrents: next.torrents)
-            let previous = Dictionary(uniqueKeysWithValues: snapshot.torrents.map { ($0.id, $0) })
-            if settings.notifyOnCompletion {
-                for torrent in next.torrents where torrent.progress >= 1 {
-                    if let old = previous[torrent.id], old.progress < 1 {
-                        let content = UNMutableNotificationContent()
-                        content.title = "下载完成"
-                        content.body = torrent.name
-                        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: torrent.id, content: content, trigger: nil))
-                    }
-                }
-            }
+            let next = try await application.snapshot()
             snapshot = next
             onStatusChange?()
             reconcileSelection()
@@ -78,8 +59,8 @@ final class AppStore {
     private func run(_ operation: @escaping () async throws -> Void) {
         guard !stopping else { return }
         Task {
-            do { try await operation(); try await engine.save(); await refresh() }
-            catch { present(error) }
+            do { try await operation(); await refresh() }
+            catch { await refresh(); present(error) }
         }
     }
 
@@ -92,22 +73,12 @@ final class AppStore {
     /// Reports accepted sources so a partially successful batch is not submitted twice.
     func addFromForm(sources: [String], completion: @escaping ([String], String?) -> Void) {
         guard !stopping else { completion([], "下载引擎正在关闭。"); return }
-        let destination = settings.downloadPath
-        let paused = settings.addPaused
         Task {
-            var accepted: [String] = []
-            var failure: String?
             do {
-                try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
-                for source in sources {
-                    try await engine.add(source: source, savePath: destination, paused: paused)
-                    accepted.append(source)
-                }
-            } catch { failure = error.localizedDescription }
-            do { try await engine.save() }
-            catch { failure = [failure, "任务保存失败：\(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n") }
-            await refresh()
-            completion(accepted, failure)
+                let result = try await application.add(sources: sources)
+                await refresh()
+                completion(result.accepted, result.failure)
+            } catch { completion([], error.localizedDescription) }
         }
     }
 
@@ -119,26 +90,25 @@ final class AppStore {
 
     func startSelected() {
         let ids = selectedIDs
-        run { [self] in for id in ids { try await engine.resume(id: id) } }
+        run { [self] in try await application.execute(.resume(Array(ids).sorted())) }
     }
     func pauseSelected() {
         let ids = selectedIDs
-        run { [self] in for id in ids { try await engine.pause(id: id) } }
+        run { [self] in try await application.execute(.pause(Array(ids).sorted())) }
     }
     func startAll() {
         let ids = snapshot.torrents.map(\.id)
-        run { [self] in for id in ids { try await engine.resume(id: id) } }
+        run { [self] in try await application.execute(.resume(Array(ids).sorted())) }
     }
     func pauseAll() {
         let ids = snapshot.torrents.map(\.id)
-        run { [self] in for id in ids { try await engine.pause(id: id) } }
+        run { [self] in try await application.execute(.pause(Array(ids).sorted())) }
     }
     func applyDefaultTrackers(completion: @escaping (Int?) -> Void) {
         guard !stopping, !savingSettings else { completion(nil); return }
         Task {
             do {
-                let changed = try await engine.applyDefaultTrackers()
-                try await engine.save()
+                let changed = try await application.applyDefaultTrackers()
                 await refresh()
                 completion(changed)
             } catch { completion(nil); present(error) }
@@ -155,8 +125,7 @@ final class AppStore {
         Task {
             var failure: String?
             do {
-                for id in existing { try await engine.remove(id: id, deleteFiles: deleteFiles) }
-                try await engine.save()
+                try await application.execute(.remove(existing.sorted(), deleteFiles: deleteFiles))
             } catch { failure = error.localizedDescription }
             await refresh()
             completion(failure)
@@ -167,8 +136,7 @@ final class AppStore {
         guard !stopping else { completion("下载引擎正在关闭。"); return }
         Task {
             do {
-                try await engine.setFilePriority(id: id, index: index, priority: priority)
-                try await engine.save()
+                try await application.execute(.priority(id: id, index: index, priority: priority))
                 await refresh()
                 completion(nil)
             } catch { completion(error.localizedDescription) }
@@ -186,26 +154,8 @@ final class AppStore {
         Task { [self] in
             defer { savingSettings = false }
             do {
-                let next = try value.validated()
-                let previous = settings
-                let encoded = try JSONEncoder().encode(next)
-                try FileManager.default.createDirectory(atPath: next.downloadPath, withIntermediateDirectories: true)
-                let previousData = try JSONEncoder().encode(previous)
-                try await SettingsTransaction.commit {
-                    try encoded.write(to: settingsURL, options: .atomic)
-                } apply: {
-                    try await engine.applySettings(next)
-                } rollback: {
-                    // Restore persisted preferences even if restoring the engine fails.
-                    try previousData.write(to: settingsURL, options: .atomic)
-                    try await engine.applySettings(previous)
-                }
-                let requestNotifications = next.notifyOnCompletion && !previous.notifyOnCompletion
-                settings = next
+                try await application.updateSettings(value)
                 onChange?()
-                if requestNotifications {
-                    _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-                }
                 completion?(true)
             } catch { completion?(false); present(error) }
         }
@@ -214,7 +164,7 @@ final class AppStore {
     func refreshDetail(id: String, completion: @escaping (TorrentSnapshot?, String?) -> Void) {
         guard !stopping else { completion(nil, "下载引擎正在关闭。"); return }
         Task {
-            do { completion(try await engine.detail(id: id), nil) }
+            do { completion(try await application.detail(id: id), nil) }
             catch { completion(nil, error.localizedDescription) }
         }
     }
@@ -242,7 +192,8 @@ final class AppStore {
     func shutdown() async throws {
         stopping = true
         polling?.cancel()
-        do { try await engine.close() }
+        polling = nil
+        do { try await application.shutdown() }
         catch { stopping = false; start(); throw error }
     }
 }

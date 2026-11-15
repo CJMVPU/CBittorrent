@@ -1,7 +1,7 @@
 import Foundation
 
 /// The C++ session and its bridge are accessed only through this serial queue.
-final class EngineService: @unchecked Sendable {
+final class EngineService: TransferEngine, @unchecked Sendable {
     private let queue = DispatchQueue(label: "io.github.CJMVPU.CBittorrent.engine", qos: .utility)
     private var handle: OpaquePointer?
 
@@ -87,6 +87,7 @@ final class EngineService: @unchecked Sendable {
     }
 
     func setFilePriority(id: String, index: Int, priority: Int) async throws {
+        _ = try FilePriorityChange(index: index, priority: priority)
         try await perform { handle in
             var error: UnsafeMutablePointer<CChar>?
             let result = id.withCString { cbt_engine_set_file_priority(handle, $0, Int32(index), Int32(priority), &error) }

@@ -4,7 +4,7 @@
 
 `Resources/CB-symbol.png` is the approved original artistic CB monogram with
 its white background removed by the built-in imagegen tool. The calligraphic
-shapes are shared by Dock, titlebar and menu bar through `App/BrandMark.swift`.
+shapes are shared by Dock, titlebar and menu bar through `App/UI/BrandMark.swift`.
 The geometric substitute shipped in 0.3.0 has been removed.
 
 Final extraction prompt:

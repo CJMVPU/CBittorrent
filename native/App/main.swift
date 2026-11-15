@@ -29,7 +29,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             guard lockDescriptor >= 0, flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0 else {
                 throw ClientError.message("此配置目录已被另一个 CBittorrent 实例使用，或无法写入。")
             }
-            let store = try AppStore(profile: profile)
+            let store = try AppComposition.makeStore(profile: profile)
             self.store = store
             controller = MainWindowController(store: store)
             statusBar = StatusBarController(store: store,

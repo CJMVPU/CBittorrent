@@ -35,9 +35,16 @@ if(BUILD_TESTING)
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/run_ui.sh"
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
+    add_test(NAME native_application
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/run_application.sh"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME native_packaging
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/packaging_test.py"
     )
-    set_tests_properties(native_engine native_settings native_ui native_packaging PROPERTIES TIMEOUT 180)
+    add_test(NAME native_architecture
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/architecture_test.py"
+    )
+    set_tests_properties(native_engine native_settings native_ui native_packaging native_application native_architecture PROPERTIES TIMEOUT 180)
 endif()

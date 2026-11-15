@@ -37,7 +37,11 @@ The old Qt-related CMake options are not part of this build.
 
 ## Architecture and packaging
 
-- `App/`: Swift state, engine service and app lifecycle.
+- `App/Domain/`: transfer policies, read models and validated preferences.
+- `App/Application/`: use cases, transactions, lifecycle ordering and ports.
+- `App/Infrastructure/`: C engine, settings storage and notification adapters.
+- `App/Composition/`: production dependency wiring.
+- `App/main.swift`: process locking and app lifecycle.
 - `App/UI/`: native AppKit interface, embedded pages and background filesystem service.
 - `Engine/CBTEngine.h`: ownership-explicit C API imported into Swift.
 - `Engine/CBTEngine.mm`: libtorrent session, commands, snapshots and resume data.
@@ -60,6 +64,9 @@ still run for each bundle. Test engine compilation keeps its own debug flags.
 The build signs the app ad hoc and verifies its signature. Developer ID
 signing, notarization, App Store sandboxing and a distributable installer are
 not provided by this local build route.
+
+See [architecture and upstream integration](ARCHITECTURE.md) for dependency
+boundaries, extension rules and use-case consistency.
 
 ## Scope
 
@@ -101,6 +108,8 @@ peers, with DHT, trackers, local discovery and router traffic disabled:
 
 ```sh
 ./native/tests/run.sh
+./native/tests/run_application.sh
+python3 native/tests/architecture_test.py
 ./native/tests/run_settings.sh
 ./native/tests/run_ui.sh
 python3 native/tests/packaging_test.py
