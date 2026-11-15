@@ -146,10 +146,18 @@ void checkUploadInterop(const fs::path &root)
             const std::string received((std::istreambuf_iterator<char>(output)), std::istreambuf_iterator<char>());
             require(received == payload, "Upload comparison payload mismatch");
             int64_t uploaded = 0;
-            if (native)
-                uploaded = snapshot(engine.get()).get_child("torrents").front().second.get<int64_t>("uploaded");
-            else
-                uploaded = referenceSeed.status().all_time_upload;
+            // The receiver's disk completion and the sender's accounting tick
+            // are asynchronous, including in an unwrapped libtorrent session.
+            const auto accountingDeadline = std::chrono::steady_clock::now() + 5s;
+            do
+            {
+                if (native)
+                    uploaded = snapshot(engine.get()).get_child("torrents").front().second.get<int64_t>("uploaded");
+                else
+                    uploaded = referenceSeed.status().all_time_upload;
+                if (uploaded >= static_cast<int64_t>(payload.size())) break;
+                std::this_thread::sleep_for(50ms);
+            } while (std::chrono::steady_clock::now() < accountingDeadline);
             require(uploaded >= static_cast<int64_t>(payload.size()), "Sender upload accounting did not record transfer");
             std::cout << "PASS: upload comparison " << label << ": received " << received.size()
                       << " bytes, sender recorded " << uploaded << " bytes\n";
