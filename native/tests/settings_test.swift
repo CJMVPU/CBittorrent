@@ -13,6 +13,11 @@ struct SettingsTests {
         try expect(migrated.enableDHT && migrated.queueEnabled && migrated.listenPort == 0 && !migrated.autoAddTrackers && migrated.defaultTrackers.isEmpty,
                    "New setting defaults did not populate")
         var configured = migrated
+        try expect(migrated.uploadSlotsPerTorrent == 0 && migrated.peerConnectTimeout == 15 && !migrated.anonymousMode,
+                   "New connection settings changed legacy behavior")
+        configured.uploadSlotsPerTorrent = 4
+        configured.peerConnectTimeout = 22
+        configured.anonymousMode = true
         configured.listenPort = 50123
         configured.enableDHT = false
         configured.seedRatioLimit = 1.25
@@ -27,6 +32,7 @@ struct SettingsTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(normalized))
         try expect(decoded == normalized, "Expanded settings did not round-trip")
         let invalid: [(inout AppSettings) -> Void] = [
+            { $0.peerConnectTimeout = 0 }, { $0.peerConnectTimeout = 121 }, { $0.uploadSlotsPerTorrent = -1 },
             { $0.listenPort = 65536 }, { $0.downloadLimitKB = -1 },
             { $0.uploadLimitKB = Int.max }, { $0.maxConnections = 1 },
             { $0.maxActiveDownloads = 0 }, { $0.seedRatioLimit = .nan },

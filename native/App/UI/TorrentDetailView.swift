@@ -71,7 +71,10 @@ final class TorrentDetailView: SurfaceView {
         torrent = value
         list.strings = filesMode
             ? value.files.map { "\(Int(min(1, max(0, $0.progress)) * 100))%  ·  \(Titanium.bytes($0.size))  ·  \($0.path)" }
-            : value.trackers.map { $0.url }
+            : value.trackers.map {
+                let status = ["updating": "联系中", "working": "已响应", "error": "失败", "waiting": "等待"]
+                return "[\(status[$0.status] ?? $0.status)]  \($0.url)\(($0.message?.isEmpty == false) ? " · " + $0.message! : "")"
+            }
         if list.strings.isEmpty {
             feedback.stringValue = filesMode ? "正在获取元数据，文件列表将自动更新。" : "此任务尚无 Tracker。"
         } else if feedback.stringValue == "正在获取元数据，文件列表将自动更新。" || feedback.stringValue == "此任务尚无 Tracker。" {

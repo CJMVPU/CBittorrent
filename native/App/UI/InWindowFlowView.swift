@@ -6,6 +6,7 @@ enum InWindowRequest {
     case remove(ids: Set<String>)
     case files(TorrentSnapshot)
     case trackers(TorrentSnapshot)
+    case connections(TorrentSnapshot)
     case message(title: String, body: String)
     case about
     case browseLocation(URL)
@@ -20,6 +21,7 @@ final class InWindowFlowView: SurfaceView {
     private var sourceEditor: NSTextView?
     private var browser: InlineFileBrowser?
     private var detailView: TorrentDetailView?
+    private var peerView: PeerDetailView?
 
     init(request: InWindowRequest, store: AppStore, onClose: @escaping () -> Void) {
         self.store = store
@@ -36,6 +38,11 @@ final class InWindowFlowView: SurfaceView {
         case .remove(let ids): buildRemove(ids)
         case .files(let torrent): buildFiles(torrent)
         case .trackers(let torrent): buildTrackers(torrent)
+        case .connections(let torrent):
+            heading("连接详情", subtitle: torrent.name)
+            let view = PeerDetailView(torrent: torrent, store: store)
+            peerView = view
+            addSubview(view)
         case .message(let title, let body):
             heading(title, subtitle: "")
             textArea(body, frame: NSRect(x: 28, y: 128, width: 844, height: 344))
@@ -232,7 +239,7 @@ final class InWindowFlowView: SurfaceView {
         addSubview(view)
     }
 
-    func refreshDetails() { detailView?.refresh() }
+    func refreshDetails() { detailView?.refresh(); peerView?.refresh() }
 
     private func showBrowser(mode: InlineFileBrowser.Mode, initial: URL, onSelect: @escaping ([URL]) -> Void) {
         let picker = InlineFileBrowser(frame: bounds, mode: mode, initial: initial, onSelect: onSelect) { [weak self] in

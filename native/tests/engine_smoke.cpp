@@ -234,7 +234,7 @@ int main()
         require(settings(download.get()).get<int>("effective.downloadRateLimit") == 128 * 1024,
             "Invalid settings partially changed the engine");
         for (const char *invalid : {R"({"queueEnabled":"true"})", R"({"maxConnectionsPerTorrent":1})",
-            R"({"proxyType":1,"proxyHost":"https://example.invalid"})", R"({"seedRatioLimit":-1})"})
+            R"({"proxyType":1,"proxyHost":"https://example.invalid"})", R"({"seedRatioLimit":-1})", R"({"peerConnectTimeout":0})", R"({"uploadSlotsPerTorrent":-1})", R"({"anonymousMode":1})"})
         {
             settingsError = nullptr;
             require(cbt_engine_apply_settings(download.get(), invalid, &settingsError) == 0, "Malformed settings were accepted");
@@ -256,13 +256,35 @@ int main()
         require(taskSettings.get<bool>("sequentialDownloads") && !taskSettings.get<bool>("enablePeX")
             && !taskSettings.get<bool>("autoManaged") && taskSettings.get<int>("maxConnections") == 8,
             "New torrent did not receive global torrent settings");
+        apply(download.get(), R"({"uploadSlotsPerTorrent":3,"peerConnectTimeout":22,"anonymousMode":true})");
+        const auto connectionSettings = settings(download.get());
+        require(connectionSettings.get<int>("effective.peerConnectTimeout") == 22
+            && connectionSettings.get<bool>("effective.anonymousMode")
+            && connectionSettings.get_child("torrents").front().second.get<int>("uploadSlots") == 3,
+            "Connection settings did not reach the live engine");
+        apply(download.get(), R"({"anonymousMode":false})");
+        // Keep a real peer observable across polling intervals on fast loopback.
+        apply(seed.get(), R"({"uploadLimitKB":64})");
+        bool sawConnection = false;
         int attempt = 0;
         const auto completed = waitFor(download.get(), [&](const pt::ptree &state)
         {
             if (++attempt % 10 == 1)
                 call([&](char **error) { return cbt_engine_connect_peer(download.get(), id.c_str(), "127.0.0.1", seedPort, error); });
+            for (const auto &entry : firstTorrent(state).get_child("connections"))
+            {
+                const auto &peer = entry.second;
+                require(peer.get<std::string>("address") == "127.0.0.1" && peer.get<int>("port") == seedPort,
+                    "Connection endpoint does not match the loopback peer");
+                require(peer.get<int64_t>("downloadRate") >= 0 && peer.get<int64_t>("uploaded") >= 0,
+                    "Invalid connection transfer counters");
+                require(peer.get<std::string>("transport") == "TCP" || peer.get<std::string>("transport") == "µTP",
+                    "Missing connection transport");
+                sawConnection = true;
+            }
             return firstTorrent(state).get<std::string>("state") == "seeding";
         }, 45s);
+        require(sawConnection, "No connection projection was observed during loopback transfer");
         require(firstTorrent(completed).get<std::string>("id") == id, "Torrent ID changed after metadata acquisition");
         require(firstTorrent(completed).get<int64_t>("downloaded") == static_cast<int64_t>(payload.size()), "Downloaded byte count mismatch");
         waitFor(download.get(), [&](const pt::ptree &state)
@@ -279,6 +301,7 @@ int main()
             return result;
         };
         const auto lightweight = readSnapshot(cbt_engine_summary_json(download.get()));
+        require(firstTorrent(lightweight).get_child("connections").empty(), "Summary unexpectedly enumerates peer details");
         require(firstTorrent(lightweight).get_child("files").empty(), "Summary unexpectedly includes file details");
         require(firstTorrent(lightweight).get_child("trackers").empty(), "Summary unexpectedly includes tracker details");
         const auto detail = readSnapshot(cbt_engine_detail_json(download.get(), id.c_str()));

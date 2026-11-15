@@ -175,6 +175,13 @@ final class AppStore {
             else if let error { self?.present(ClientError.message(error)) }
         }
     }
+    func showConnections() {
+        guard let torrent = selectedTorrent else { return }
+        refreshDetail(id: torrent.id) { [weak self] detail, error in
+            if let detail { self?.onPresent?(.connections(detail)) }
+            else if let error { self?.present(ClientError.message(error)) }
+        }
+    }
     func showTrackers() {
         guard let torrent = selectedTorrent else { return }
         refreshDetail(id: torrent.id) { [weak self] detail, error in

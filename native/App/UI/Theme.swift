@@ -6,7 +6,7 @@ enum Titanium {
     static let panel = NSColor.white
     static let chrome = NSColor(hex: 0xEEF0F3)
     static let text = NSColor(hex: 0x303744)
-    static let muted = NSColor(hex: 0x7D8592)
+    static let muted = NSColor(hex: 0x626D7C)
     static let accent = NSColor(hex: 0x5D7DB4)
     static let selection = NSColor(hex: 0xEAF0F9)
     static let hover = NSColor(hex: 0xE8EBEF)

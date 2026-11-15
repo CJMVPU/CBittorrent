@@ -58,8 +58,8 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
                                       frame: NSRect(x: 16, y: 74 + page.rawValue * 42, width: 124, height: 32)) { [weak self] in
                 self?.show(page)
             }
-            button.selectionChangesBackground = false
-            button.hoverColor = .clear
+            button.selectionChangesBackground = true
+            button.hoverColor = Titanium.hover
             button.alignment = .left
             button.font = Titanium.font(12)
             button.setTitle(page.title)
@@ -184,6 +184,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
                 }
                 group("连接数量", in: document, y: &y) { box, row in
                     integer("全局最大连接数", detail: "0 表示不限。", key: \.maxConnections, unit: "个连接", in: box, y: &row)
+                    integer("连接建立超时", detail: "TCP 节点连接尝试的等待时间，范围 1–120 秒。", key: \.peerConnectTimeout, unit: "秒", in: box, y: &row)
                     integer("每个任务最大连接数", detail: "0 表示不限。", key: \.maxConnectionsPerTorrent, unit: "个连接", in: box, y: &row)
                 }
             case .speed:
@@ -192,6 +193,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
                     integer("上传上限", detail: "0 表示不限速。", key: \.uploadLimitKB, unit: "KiB/s", in: box, y: &row)
                 }
                 group("上传并发", in: document, y: &y) { box, row in
+                    integer("每任务上传槽位", detail: "0 表示不限；仍受全局上传槽位约束。", key: \.uploadSlotsPerTorrent, unit: "个槽位", in: box, y: &row)
                     integer("全局上传槽位", detail: "同时向多少个节点上传；0 表示不限。", key: \.uploadSlots, unit: "个槽位", in: box, y: &row)
                 }
             case .bittorrent:
@@ -219,6 +221,9 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
                     trackerList(in: box, y: &row)
                 }
             case .advanced:
+                group("隐私", in: document, y: &y) { box, row in
+                    toggle("匿名模式", detail: "减少协议中暴露的客户端信息；不会隐藏 IP，也不替代 VPN 或代理。", key: \.anonymousMode, in: box, y: &row)
+                }
                 group("传输协议", in: document, y: &y) { box, row in
                     choice("允许的连接协议", options: ["TCP 与 µTP", "仅 TCP", "仅 µTP"], key: \.transportMode, in: box, y: &row)
                 }
@@ -254,16 +259,18 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         view.addSubview(label)
         if let detail {
             let hint = Titanium.label(detail, size: 10, color: Titanium.muted)
-            hint.frame = NSRect(x: 18, y: y + 42, width: documentWidth - 36, height: 19)
+            hint.frame = NSRect(x: 18, y: y + 42, width: documentWidth - 36, height: 30)
+            hint.maximumNumberOfLines = 2
+            hint.cell?.wraps = true
             hint.toolTip = detail
             view.addSubview(hint)
         }
     }
 
     private func underlineContainer(in view: NSView, y: CGFloat) -> SurfaceView {
-        let container = SurfaceView(frame: NSRect(x: inputColumnX, y: y + 9, width: inputWidth, height: 30))
-        let line = SurfaceView(frame: NSRect(x: 0, y: 29, width: inputWidth, height: 1), color: NSColor(hex: 0xCBD2DD))
-        container.addSubview(line)
+        let container = SurfaceView(frame: NSRect(x: inputColumnX, y: y + 9, width: inputWidth, height: 30), color: Titanium.panel, radius: 6)
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor(hex: 0xD5DBE4).cgColor
         view.addSubview(container)
         return container
     }
@@ -271,7 +278,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
     private func makeInput(title: String, in view: NSView, y: CGFloat) -> NSTextField {
         let container = underlineContainer(in: view, y: y)
         // Display and editing share the same font-derived centered line rect.
-        let field = NSTextField(frame: NSRect(x: 0, y: 4, width: inputWidth, height: 22))
+        let field = NSTextField(frame: NSRect(x: 8, y: 4, width: inputWidth - 16, height: 22))
         field.cell = CenteredTextFieldCell(textCell: "")
         field.isBezeled = false
         field.isEditable = true
@@ -310,7 +317,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
             }
             self.draft[keyPath: key] = value
         }
-        y += detail == nil ? 52 : 72
+        y += detail == nil ? 52 : 82
         return field
     }
 
@@ -327,7 +334,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
             }
             self.draft[keyPath: key] = value
         }
-        y += 72
+        y += 82
     }
 
     @discardableResult
@@ -361,7 +368,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         writers.append { [weak toggle] value in toggle?.state = value[keyPath: key] ? .on : .off }
         view.addSubview(toggle)
         editableControls.append(toggle)
-        y += detail == nil ? 52 : 72
+        y += detail == nil ? 52 : 82
         return toggle
     }
 
@@ -387,12 +394,12 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         writers.append { [weak popup] value in popup?.selectItem(at: value[keyPath: key]) }
         container.addSubview(popup)
         editableControls.append(popup)
-        y += detail == nil ? 52 : 72
+        y += detail == nil ? 52 : 82
     }
 
     private func trackerList(in view: NSView, y: inout CGFloat) {
         let hint = Titanium.label("每行一个地址，支持 HTTP、HTTPS 和 UDP；保存时自动去重。", size: 10, color: Titanium.muted)
-        hint.frame = NSRect(x: 18, y: y + 6, width: documentWidth - 36, height: 19)
+        hint.frame = NSRect(x: 18, y: y + 6, width: documentWidth - 36, height: 30)
         view.addSubview(hint)
 
         let editorScroll = NSScrollView(frame: NSRect(x: 18, y: y + 32, width: documentWidth - 36, height: 118))

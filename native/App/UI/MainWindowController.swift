@@ -5,7 +5,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
                                   NSTableViewDelegate, NSSearchFieldDelegate {
     private let store: AppStore
     private let surface = SurfaceView(frame: NSRect(x: 0, y: 0, width: 900, height: 600), color: Titanium.panel)
-    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 32, width: 888, height: 541))
+    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 32, width: 888, height: 493))
     private let table = StripedTransferTableView()
     private let search = NSSearchField()
     private let emptyLabel = Titanium.label("添加种子文件或磁力链接，开始第一次传输。", size: 13, color: Titanium.muted, alignment: .center)
@@ -22,6 +22,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private var lastDiskCheck = Date.distantPast
     private var diskStatus = ""
     private var checkingDisk = false
+    private let selectionSummary = Titanium.label(size: 11)
+    private let selectionMetrics = Titanium.label(size: 10, color: Titanium.muted)
 
     init(store: AppStore) {
         self.store = store
@@ -49,6 +51,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         buildTitlebar()
         buildTable()
         buildStatusbar()
+        buildSelectionBar()
         settingsView = SettingsView(store: store) { [weak self] in self?.showTransfers() }
         settingsView.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
         settingsView.isHidden = true
@@ -212,7 +215,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func buildTable() {
         table.backgroundColor = Titanium.panel
         table.headerView = QuietHeaderView(frame: NSRect(x: 0, y: 0, width: 886, height: 25))
-        table.rowHeight = 24
+        table.rowHeight = 28
         table.intercellSpacing = .zero
         table.gridStyleMask = []
         table.usesAlternatingRowBackgroundColors = false
@@ -251,6 +254,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         surface.addSubview(scrollView)
         emptyLabel.frame = NSRect(x: 30, y: 285, width: 840, height: 26)
         surface.addSubview(emptyLabel)
+    }
+
+    private func buildSelectionBar() {
+        let bar = SurfaceView(frame: NSRect(x: 0, y: 525, width: 900, height: 48), color: Titanium.background)
+        selectionSummary.frame = NSRect(x: 16, y: 5, width: 520, height: 20)
+        bar.addSubview(selectionSummary)
+        selectionMetrics.frame = NSRect(x: 16, y: 26, width: 520, height: 17)
+        bar.addSubview(selectionMetrics)
+        let actions: [(String, String, () -> Void)] = [
+            ("文件", "doc", { [weak store] in store?.showFiles() }),
+            ("Tracker", "link", { [weak store] in store?.showTrackers() }),
+            ("连接", "network", { [weak store] in store?.showConnections() })]
+        for (index, action) in actions.enumerated() {
+            let button = ActionButton(action.0, symbol: action.1,
+                frame: NSRect(x: 552 + index * 112, y: 9, width: 104, height: 30), action: action.2)
+            button.setAccessibilityLabel("查看" + action.0)
+            bar.addSubview(button)
+            selectionButtons.append(button)
+        }
+        surface.addSubview(bar)
     }
 
     private func buildStatusbar() {
@@ -309,6 +332,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func updateStatus() {
         let snapshot = store.snapshot
         let connections = snapshot.summary.peerCount
+        if let torrent = store.selectedTorrent {
+            selectionSummary.stringValue = store.selectedIDs.count == 1
+                ? torrent.name
+                : "已选择 \(store.selectedIDs.count) 个任务 · 详情显示首个选中任务"
+            selectionSummary.toolTip = torrent.name + "\n" + torrent.savePath
+            selectionMetrics.stringValue = "\(Titanium.state(torrent.state)) · \(torrent.peers) 个连接 · \(torrent.seeds) 个种子 · 已上传 \(Titanium.bytes(torrent.uploaded))"
+        } else {
+            selectionSummary.stringValue = "选择任务查看文件、Tracker 和具体连接信息"
+            selectionSummary.toolTip = nil
+            selectionMetrics.stringValue = "双击任务浏览保存位置；详情可在右侧打开"
+        }
         if !checkingDisk && Date().timeIntervalSince(lastDiskCheck) > 15 {
             checkingDisk = true
             lastDiskCheck = Date()
@@ -412,7 +446,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func showMore(from button: NSView) {
         let menu = NSMenu()
         for (title, action) in [("打开保存位置", #selector(revealSelection)),
-                                ("查看文件", #selector(showFiles)), ("查看 Tracker", #selector(showTrackers))] {
+                                ("查看文件", #selector(showFiles)), ("查看 Tracker", #selector(showTrackers)),
+                                ("查看连接", #selector(showConnections))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             menu.addItem(item)
@@ -421,6 +456,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     }
 
     @objc private func revealSelection() { store.revealSelected() }
+    @objc private func showConnections() { store.showConnections() }
     @objc private func showFiles() { store.showFiles() }
     @objc private func showTrackers() { store.showTrackers() }
 }

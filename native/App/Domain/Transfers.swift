@@ -12,6 +12,7 @@ struct TorrentFileSnapshot: Codable, Identifiable {
 struct TrackerSnapshot: Codable {
     var url: String
     var status: String
+    var message: String?
 }
 
 struct TorrentSnapshot: Codable, Identifiable {
@@ -32,6 +33,7 @@ struct TorrentSnapshot: Codable, Identifiable {
     var error: String
     var files: [TorrentFileSnapshot]
     var trackers: [TrackerSnapshot]
+    var connections: [PeerSnapshot]?
 }
 
 struct EngineSnapshot: Codable {
@@ -84,7 +86,7 @@ struct TransferSummary {
 }
 
 enum TaskFilter: String, CaseIterable {
-    case all, downloading, seeding, paused, queued
+    case all, downloading, seeding, paused, queued, checking, error
 
     func matches(_ torrent: TorrentSnapshot) -> Bool {
         self == .all || TransferState(rawValue: torrent.state)?.filter == self

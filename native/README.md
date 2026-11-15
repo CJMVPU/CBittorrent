@@ -176,9 +176,11 @@ Fork owners must enable Actions once before the first run.
 ## Current interface
 
 The app uses a fixed 900 × 600pt window with a 32pt titlebar, 27pt footer,
-and 24pt alternating task rows. Search, status filters, adding tasks, settings,
+and 28pt alternating task rows. Search, status filters, adding tasks, settings,
 and task actions share this window. File and directory browsing, confirmation,
-errors, file priorities and Tracker details are embedded pages. System-owned
+errors, file priorities, Tracker diagnostics and peer connections are embedded pages.
+A selection bar provides direct Files, Tracker and Connections actions.
+Checking and Error filters complement the transfer-state filters. System-owned
 permission prompts remain controlled by macOS.
 
 Task selection is limited to visible rows. Changing search/filter criteria or
@@ -191,7 +193,10 @@ Tracker and Advanced. Switching sections or returning to transfers preserves
 unsaved edits. Save applies validated settings explicitly; Restore discards the
 draft. Numeric values use a shared 260pt input column. Zero means automatic for
 the listen port and unlimited for rate, connection, upload-slot and seeding caps.
-Queue counts must be positive. Preallocation applies only to newly added tasks;
+Queue counts must be positive. Per-task upload slots use 0 for unlimited and
+remain subject to the global slot limit. TCP connection establishment timeout
+accepts 1–120 seconds (default 15). Anonymous mode is opt-in and reduces
+client-identifying protocol information; it does not conceal the IP address. Preallocation applies only to newly added tasks;
 sequential downloading also applies to existing tasks. Manual pauses survive
 unrelated settings changes.
 
@@ -216,3 +221,31 @@ Use the installed app in `/Applications` for normal launch/quit acceptance.
 Keep older app backups as ZIP archives so Launch Services does not discover
 multiple obsolete copies with the same bundle identifier. Updating the bundle
 must preserve the application support profile and downloaded files.
+
+## Connection diagnostics
+
+Select a task and choose Connections in the selection bar or task menu. The
+read-only table shows remote endpoint, client, completion, payload rates,
+transport and direction. Selection reveals the local endpoint, encryption,
+peer sources, cumulative connection traffic and choking state. IP/client/protocol
+filtering keeps selection tied to the same connection, not the same row index.
+Established connections sort before pending handshakes. Automatic refresh can
+be paused for inspection and manual refresh remains available. Details refresh
+every two seconds only while visible; ordinary list snapshots do
+not enumerate peers. IPv6 endpoints use brackets. No reverse DNS, geolocation or
+third-party lookup service is used. Connection addresses are not persisted.
+Tracker details show current announce status and the last available error/warning.
+
+## Settings coverage review (0.7.0)
+
+The existing destination, add-paused, allocation, sequencing, queue, seeding,
+rate, discovery, encryption, mapping and proxy controls cover basic transfer
+operation. This update fills per-task upload concurrency, TCP connect timeout
+and protocol anonymity gaps, with compatible defaults and engine readback tests.
+Authenticated proxies need credential/keychain design; network-interface binding
+needs missing-interface/recovery handling. These and IP blocklists, scheduled
+rates and automatic RSS rules remain separate features, not nonfunctional UI
+controls. The app does not claim a VPN kill switch or hidden IP addresses.
+
+Protocol behavior follows the upstream [peer information API](https://www.libtorrent.org/reference-Torrent_Handle.html)
+and [settings reference](https://www.libtorrent.org/reference-Settings.html).

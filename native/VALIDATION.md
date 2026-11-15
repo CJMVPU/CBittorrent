@@ -327,3 +327,34 @@ was removed or replaced by the isolated UI test profile.
   sections describe past checks, not permanently retained artifacts.
 - Architecture changes do not establish a public tracker throughput benchmark or
   eliminate the need to review future upstream semantic changes.
+
+## 0.7.0 — Interface and connection diagnostics (2026-11-15)
+
+- Full `native/scripts/ci.sh verify` passed: 7/7 CTest groups, arm64/no-Qt and
+  dependency audit, strict signature verification and ZIP extraction round trip.
+  Workflow lint, shell lint, Python compilation and whitespace checks passed.
+- Added a task selection bar, Checking/Error filters, clearer settings selection,
+  outlined numeric inputs and wrapping explanations. All seven settings sections
+  are exercised by the UI geometry harness.
+- Added read-only peer projections through the existing domain/application/engine
+  boundaries. The loopback test verifies a real peer's endpoint, protocol and
+  traffic fields; ordinary summary snapshots still omit peer enumeration.
+  Local-only test sessions apply global rate limits to loopback peers so the
+  short fixture transfer can be observed reliably.
+- Settings tests cover old-profile defaults, round trips and validation for
+  per-task upload slots, TCP connect timeout and anonymous mode. Engine readback
+  verifies the mapped values and per-task limits.
+- UI regressions cover IPv6 formatting, seven-column geometry, a visible header,
+  pause-refresh accessibility, selected diagnostics, filtering and selection
+  clearing. Existing marquee, application, storage and architecture tests remain.
+- Native UI acceptance observed the installed task restored in seeding state,
+  aligned connection/settings pages, live peer rows, pause/resume refresh and
+  selected local/remote endpoint, encryption and traffic diagnostics. No task or
+  saved preference was changed for this acceptance. Real-world throughput was
+  not benchmarked; transient connecting/handshake peers are labeled separately.
+- Release evidence and the profile-preserving installation receipt are retained
+  in `build/release-0.7.0/`. GitHub Actions acceptance is tracked by the pushed
+  commit; local installation and remote CI are separate checks.
+- Installed 0.7.0 (12) matches the final verified bundle. All three profile files
+  remained byte-identical across replacement. Final startup, live diagnostics
+  and pause/resume accessibility were rechecked after installation.

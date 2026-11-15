@@ -3,7 +3,7 @@ import Foundation
 /// Unknown future engine states remain visible under All without being
 /// incorrectly treated as downloading, paused or completed.
 enum TransferState: String {
-    case downloading, metadata, seeding, paused, queued
+    case downloading, metadata, seeding, paused, queued, checking, error
 
     var filter: TaskFilter {
         switch self {
@@ -11,6 +11,8 @@ enum TransferState: String {
         case .seeding: return .seeding
         case .paused: return .paused
         case .queued: return .queued
+        case .checking: return .checking
+        case .error: return .error
         }
     }
 }

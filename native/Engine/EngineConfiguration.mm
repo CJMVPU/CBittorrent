@@ -22,7 +22,7 @@ namespace NativeEngine
         return @{@"downloadLimitKB": @0, @"uploadLimitKB": @0, @"listenPort": @0,
             @"enableUPnP": @YES, @"enableNATPMP": @YES, @"enableDHT": @YES, @"enablePeX": @YES, @"enableLSD": @YES,
             @"transportMode": @0, @"encryptionMode": @0, @"maxConnections": @200,
-            @"maxConnectionsPerTorrent": @100, @"uploadSlots": @8, @"queueEnabled": @YES,
+            @"maxConnectionsPerTorrent": @100, @"uploadSlots": @8, @"uploadSlotsPerTorrent": @0, @"peerConnectTimeout": @15, @"anonymousMode": @NO, @"queueEnabled": @YES,
             @"maxActiveDownloads": @3, @"maxActiveUploads": @5, @"maxActiveTorrents": @8,
             @"seedRatioLimit": @0, @"seedTimeLimitMinutes": @0,
             @"sequentialDownloads": @NO, @"preallocateFiles": @NO,
@@ -66,7 +66,7 @@ namespace NativeEngine
                 result[key] = decoded[key];
         }
         for (NSString *key in @[@"enableUPnP", @"enableNATPMP", @"enableDHT", @"enablePeX", @"enableLSD",
-            @"queueEnabled", @"sequentialDownloads", @"preallocateFiles", @"proxyPeers", @"proxyTrackers", @"autoAddTrackers"])
+            @"queueEnabled", @"sequentialDownloads", @"preallocateFiles", @"proxyPeers", @"proxyTrackers", @"autoAddTrackers", @"anonymousMode"])
             booleanSetting(result, key);
         integerSetting(result, @"downloadLimitKB", 0, std::numeric_limits<int>::max() / 1024);
         integerSetting(result, @"uploadLimitKB", 0, std::numeric_limits<int>::max() / 1024);
@@ -78,6 +78,8 @@ namespace NativeEngine
             if (integerSetting(result, key, 0, std::numeric_limits<int>::max()) == 1)
                 throw std::invalid_argument(std::string(key.UTF8String) + " must be zero or at least two");
         }
+        integerSetting(result, @"uploadSlotsPerTorrent", 0, std::numeric_limits<int>::max());
+        integerSetting(result, @"peerConnectTimeout", 1, 120);
         integerSetting(result, @"uploadSlots", 0, std::numeric_limits<int>::max());
         for (NSString *key in @[@"maxActiveDownloads", @"maxActiveUploads", @"maxActiveTorrents"])
             integerSetting(result, key, 1, std::numeric_limits<int>::max());
@@ -138,7 +140,7 @@ namespace NativeEngine
     lt::settings_pack initialSettings()
     {
         lt::settings_pack settings;
-        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.6.0");
+        settings.set_str(lt::settings_pack::user_agent, "CBittorrent/0.7.0");
         settings.set_int(lt::settings_pack::alert_mask,
             static_cast<std::uint32_t>(lt::alert_category::error | lt::alert_category::storage | lt::alert_category::status));
         settings.set_int(lt::settings_pack::active_downloads, 3);
@@ -186,6 +188,8 @@ namespace NativeEngine
         settings.set_int(lt::settings_pack::upload_rate_limit, [next[@"uploadLimitKB"] intValue] * 1024);
         const int connections = [next[@"maxConnections"] intValue];
         settings.set_int(lt::settings_pack::connections_limit, connections == 0 ? std::numeric_limits<int>::max() : connections);
+        settings.set_int(lt::settings_pack::peer_connect_timeout, [next[@"peerConnectTimeout"] intValue]);
+        settings.set_bool(lt::settings_pack::anonymous_mode, [next[@"anonymousMode"] boolValue]);
         const int slots = [next[@"uploadSlots"] intValue];
         settings.set_int(lt::settings_pack::unchoke_slots_limit, slots == 0 ? -1 : slots);
         settings.set_int(lt::settings_pack::choking_algorithm, lt::settings_pack::fixed_slots_choker);

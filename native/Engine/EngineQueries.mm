@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <libtorrent/download_priority.hpp>
+#include <libtorrent/peer_info.hpp>
 #include <libtorrent/torrent_info.hpp>
 
 #include "EngineSupport.h"
@@ -68,14 +69,65 @@ static char *snapshotJSON(CBTEngine *engine, const char *selectedID, bool includ
                 NSMutableArray *trackers = [NSMutableArray array];
                 if (includeDetails)
                     for (const lt::announce_entry &tracker : handle.trackers())
-                        [trackers addObject:@{@"url": stringValue(tracker.url), @"status": @"configured"}];
+                    {
+                        bool updating = false;
+                        bool working = false;
+                        std::string failure;
+                        for (const auto &endpoint : tracker.endpoints)
+                            for (const auto &announce : endpoint.info_hashes)
+                            {
+                                updating = updating || announce.updating;
+                                working = working || (announce.start_sent && !announce.last_error);
+                                if (announce.last_error)
+                                    failure = announce.last_error.message();
+                                else if (!announce.message.empty())
+                                    failure = announce.message;
+                            }
+                        [trackers addObject:@{@"url": stringValue(tracker.url),
+                            @"status": updating ? @"updating" : working ? @"working" : !failure.empty() ? @"error" : @"waiting",
+                            @"message": stringValue(failure)}];
+                    }
+                NSMutableArray *connections = [NSMutableArray array];
+                if (includeDetails)
+                {
+                    std::vector<lt::peer_info> peers;
+                    handle.get_peer_info(peers);
+                    for (const auto &peer : peers)
+                    {
+                        if (peer.flags & lt::peer_info::i2p_socket)
+                            continue;
+                        const auto remote = peer.remote_endpoint();
+                        const auto local = peer.local_endpoint();
+                        NSMutableArray *sources = [NSMutableArray array];
+                        if (peer.source & lt::peer_info::tracker) [sources addObject:@"Tracker"];
+                        if (peer.source & lt::peer_info::dht) [sources addObject:@"DHT"];
+                        if (peer.source & lt::peer_info::pex) [sources addObject:@"PeX"];
+                        if (peer.source & lt::peer_info::lsd) [sources addObject:@"LSD"];
+                        if (peer.source & lt::peer_info::resume_data) [sources addObject:@"Resume"];
+                        if (peer.source & lt::peer_info::incoming) [sources addObject:@"Incoming"];
+                        [connections addObject:@{
+                            @"address": stringValue(remote.address().to_string()), @"port": @(remote.port()),
+                            @"localAddress": stringValue(local.address().to_string()), @"localPort": @(local.port()),
+                            @"client": stringValue(peer.client), @"progress": @(peer.progress_ppm / 1000000.0),
+                            @"downloadRate": @(peer.payload_down_speed), @"uploadRate": @(peer.payload_up_speed),
+                            @"downloaded": @(peer.total_download), @"uploaded": @(peer.total_upload),
+                            @"transport": (peer.flags & lt::peer_info::utp_socket) ? @"µTP" : @"TCP",
+                            @"outgoing": @(bool(peer.flags & lt::peer_info::outgoing_connection)),
+                            @"encryption": (peer.flags & lt::peer_info::rc4_encrypted) ? @"RC4"
+                                : (peer.flags & lt::peer_info::plaintext_encrypted) ? @"Handshake" : @"None",
+                            @"state": (peer.flags & lt::peer_info::connecting) ? @"connecting"
+                                : (peer.flags & lt::peer_info::handshake) ? @"handshake" : @"connected",
+                            @"uploadChoked": @(bool(peer.flags & lt::peer_info::choked)),
+                            @"downloadChoked": @(bool(peer.flags & lt::peer_info::remote_choked)), @"sources": sources}];
+                    }
+                }
                 [torrents addObject:@{@"id": stringValue(engine->torrentID(handle)), @"name": stringValue(status.name),
                     @"state": stringValue(stateName(status)), @"progress": @(status.progress), @"totalSize": @(status.total_wanted),
                     @"downloaded": @(status.total_wanted_done), @"uploaded": @(status.all_time_upload),
                     @"downloadRate": @(status.download_payload_rate), @"uploadRate": @(status.upload_payload_rate),
                     @"eta": @(eta), @"ratio": @(ratio), @"peers": @(status.num_peers), @"seeds": @(status.num_seeds),
                     @"savePath": stringValue(status.save_path), @"error": stringValue(status.errc ? status.errc.message() : ""),
-                    @"files": files, @"trackers": trackers}];
+                    @"files": files, @"trackers": trackers, @"connections": connections}];
                 downloadRate += status.download_payload_rate;
                 uploadRate += status.upload_payload_rate;
             }
@@ -137,6 +189,8 @@ char *cbt_engine_settings_json(CBTEngine *engine)
             @"downloadRateLimit": @(effective.get_int(lt::settings_pack::download_rate_limit)),
             @"uploadRateLimit": @(effective.get_int(lt::settings_pack::upload_rate_limit)),
             @"connectionsLimit": @(effective.get_int(lt::settings_pack::connections_limit)),
+            @"peerConnectTimeout": @(effective.get_int(lt::settings_pack::peer_connect_timeout)),
+            @"anonymousMode": @(effective.get_bool(lt::settings_pack::anonymous_mode)),
             @"uploadSlots": @(effective.get_int(lt::settings_pack::unchoke_slots_limit)),
             @"activeDownloads": @(effective.get_int(lt::settings_pack::active_downloads)),
             @"activeSeeds": @(effective.get_int(lt::settings_pack::active_seeds)),
@@ -155,7 +209,7 @@ char *cbt_engine_settings_json(CBTEngine *engine)
         {
             const auto status = handle.status();
             [torrents addObject:@{@"id": stringValue(engine->torrentID(handle)),
-                @"maxConnections": @(handle.max_connections()),
+                @"maxConnections": @(handle.max_connections()), @"uploadSlots": @(handle.max_uploads()),
                 @"sequentialDownloads": @(bool(status.flags & lt::torrent_flags::sequential_download)),
                 @"enablePeX": @(!bool(status.flags & lt::torrent_flags::disable_pex)),
                 @"autoManaged": @(bool(status.flags & lt::torrent_flags::auto_managed)),

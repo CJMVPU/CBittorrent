@@ -23,6 +23,8 @@ extension TaskFilter {
         case .seeding: return "做种中"
         case .paused: return "已停止"
         case .queued: return "排队中"
+        case .checking: return "校验中"
+        case .error: return "错误"
         }
     }
 

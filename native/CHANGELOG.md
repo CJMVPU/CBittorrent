@@ -3,6 +3,18 @@
 Historical behavior is recorded below; use [README.md](README.md) for the
 current specification and [VALIDATION.md](VALIDATION.md) for dated checks.
 
+## 0.7.0 — Connection diagnostics and UI clarity
+
+- Add a task selection bar with direct file, Tracker and connection actions.
+- Increase transfer row spacing, strengthen muted-text contrast and add checking
+  and error filters. Highlight selected settings sections, align outlined inputs
+  and wrap explanatory text.
+- Add searchable live peer details with endpoints, client, progress, rates,
+  transport, direction, encryption, sources and transfer/choking state.
+- Show actual Tracker announce status and errors instead of configured-only URLs.
+- Add per-task upload slots, TCP connect timeout and optional anonymous mode,
+  retaining compatible defaults for existing profiles.
+
 ## 0.6.0 — Domain and adapter boundaries
 
 - Route task operations, settings transactions and graceful shutdown through

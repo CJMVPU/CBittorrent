@@ -1,6 +1,7 @@
 #include "EngineSession.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -11,6 +12,7 @@
 
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/ip_filter.hpp>
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/session_stats.hpp>
 #include <libtorrent/write_resume_data.hpp>
@@ -30,6 +32,15 @@ CBTEngine::CBTEngine(const fs::path &profile, NSDictionary *configured)
     , session {configurationSettings(configured)}
     , configuration {configured}
 {
+    if (std::getenv("CBT_ENGINE_LOCAL_ONLY"))
+    {
+        // Loopback tests must observe rate limits too. Libtorrent normally
+        // exempts local peers, making a small transfer finish between polls.
+        auto filter = session.get_peer_class_filter();
+        const auto loopback = lt::make_address("127.0.0.1");
+        filter.add_rule(loopback, loopback, 1 << static_cast<std::uint32_t>(lt::session::global_peer_class_id));
+        session.set_peer_class_filter(filter);
+    }
     fs::create_directories(resumePath);
     ::chmod(profilePath.c_str(), 0700);
     ::chmod(resumePath.c_str(), 0700);
@@ -126,6 +137,8 @@ void CBTEngine::configureParameters(lt::add_torrent_params &params) const
     params.flags &= ~(lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download);
     params.flags |= policyFlags();
     params.max_connections = connectionLimit();
+    const int slots = [configuration[@"uploadSlotsPerTorrent"] intValue];
+    params.max_uploads = slots == 0 ? -1 : slots;
 }
 
 void CBTEngine::configureTorrent(const lt::torrent_handle &handle)
@@ -145,6 +158,8 @@ void CBTEngine::configureTorrent(const lt::torrent_handle &handle)
     const auto mask = lt::torrent_flags::disable_pex | lt::torrent_flags::sequential_download;
     handle.set_flags(policyFlags(), mask);
     handle.set_max_connections(connectionLimit());
+    const int slots = [configuration[@"uploadSlotsPerTorrent"] intValue];
+    handle.set_max_uploads(slots == 0 ? -1 : slots);
 }
 
 void CBTEngine::applyConfiguration(NSDictionary *next)
