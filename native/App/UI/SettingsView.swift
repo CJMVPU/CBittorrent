@@ -357,6 +357,11 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
                         in view: NSView, y: inout CGFloat) -> NSSwitch {
         caption(title, detail: detail, in: view, y: y)
         let toggle = NSSwitch(frame: NSRect(x: inputColumnX, y: y + 10, width: 42, height: 28))
+        toggle.wantsLayer = true
+        if let monochrome = CIFilter(name: "CIColorControls") {
+            monochrome.setValue(0, forKey: kCIInputSaturationKey)
+            toggle.contentFilters = [monochrome]
+        }
         toggle.controlSize = .regular
         toggle.setAccessibilityLabel(title)
         toggle.target = self

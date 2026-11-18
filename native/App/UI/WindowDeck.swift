@@ -5,9 +5,10 @@ import Metal
 /// Scene geometry and native control frames share top-left window coordinates.
 enum DeckLayout {
     static let window = NSRect(x: 0, y: 0, width: 932, height: 650)
-    static let title = NSRect(x: 16, y: 10, width: 900, height: 40)
-    static let page = NSRect(x: 16, y: 58, width: 900, height: 541)
-    static let status = NSRect(x: 16, y: 607, width: 900, height: 33)
+    static let barHeight: CGFloat = 28
+    static let title = NSRect(x: 16, y: 10, width: 900, height: barHeight)
+    static let page = NSRect(x: 16, y: (window.height - 541) / 2, width: 900, height: 541)
+    static let status = NSRect(x: 16, y: window.height - title.minY - barHeight, width: 900, height: barHeight)
 }
 
 @MainActor
@@ -43,14 +44,9 @@ private struct DeckScene {
         renderer.entities.append(slab(DeckLayout.window, depth: 8, radius: 3, z: -8, color: Titanium.background))
         renderer.entities.append(slab(DeckLayout.page.insetBy(dx: -2, dy: -2), depth: 6, radius: 3, z: 0, color: Titanium.chrome))
         for rect in showsStatus ? [DeckLayout.title, DeckLayout.status] : [DeckLayout.title] {
-            // Flatten a fully rounded beam in depth, retaining the curved shoulders and ends.
-            let radius = Float(rect.height) / 2
-            let foot = slab(rect.offsetBy(dx: 0, dy: 3), depth: Float(rect.height),
-                            radius: radius, z: 0, color: Titanium.background)
-            foot.scale.z = 0.10
+            let foot = slab(rect.offsetBy(dx: 0, dy: 2), depth: 4, radius: 2, z: 0, color: Titanium.background)
             renderer.entities.append(foot)
-            let beam = slab(rect, depth: Float(rect.height), radius: radius, z: 7, color: Titanium.rail)
-            beam.scale.z = 0.32
+            let beam = slab(rect, depth: 8, radius: 4, z: 5, color: Titanium.rail)
             renderer.entities.append(beam)
         }
         let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))

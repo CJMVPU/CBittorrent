@@ -22,9 +22,9 @@ final class StartupFailureController: NSWindowController, NSWindowDelegate {
         }
         let surface = WindowDeck(showsStatus: false)
         window.contentView = surface
-        let titlebar = TitlebarView(frame: DeckLayout.title.insetBy(dx: 0, dy: 4))
-        titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 4, width: 50, height: 24)))
-        let icon = NSImageView(frame: NSRect(x: 78, y: 2, width: 28, height: 28))
+        let titlebar = TitlebarView(frame: DeckLayout.title)
+        titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 2, width: 50, height: 24)))
+        let icon = NSImageView(frame: NSRect(x: 80, y: 2, width: 24, height: 24))
         icon.image = NSApp.applicationIconImage
         titlebar.addSubview(icon)
         surface.addSubview(titlebar)

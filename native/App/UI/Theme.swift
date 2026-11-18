@@ -2,20 +2,20 @@ import AppKit
 import QuartzCore
 
 enum Titanium {
-    static let background = NSColor(hex: 0x121820)
-    static let panel = NSColor(hex: 0x1A222C)
-    static let chrome = NSColor(hex: 0x303F50)
-    static let text = NSColor(hex: 0xE7EDF5)
-    static let muted = NSColor(hex: 0xB2C0D0)
-    static let accent = NSColor(hex: 0x99C7FF)
-    static let selection = NSColor(hex: 0x304866)
-    static let hover = NSColor(hex: 0x344456)
+    static let background = NSColor(hex: 0x191919)
+    static let panel = NSColor(hex: 0x232323)
+    static let chrome = NSColor(hex: 0x393939)
+    static let text = NSColor(hex: 0xECECEC)
+    static let muted = NSColor(hex: 0xBDBDBD)
+    static let accent = NSColor(hex: 0xE4E4E4)
+    static let selection = NSColor(hex: 0x454545)
+    static let hover = NSColor(hex: 0x373737)
     static let green = NSColor(hex: 0x76CFAB)
     static let orange = NSColor(hex: 0xE6B578)
     static let red = NSColor(hex: 0xF198A2)
 
-    static let stripe = NSColor(hex: 0x202A36)
-    static let rail = NSColor(hex: 0x38495D)
+    static let stripe = NSColor(hex: 0x292929)
+    static let rail = NSColor(hex: 0x535353)
 
     // A single point increase keeps every view on the same typographic scale.
     static func font(_ baseSize: CGFloat) -> NSFont {

@@ -175,7 +175,7 @@ Fork owners must enable Actions once before the first run.
 
 ## Current interface
 
-The app uses a fixed 932 × 650pt window with a dark RealityKit base, a floating 40pt toolbar, a 33pt status bar,
+The app uses a fixed 932 × 650pt window with a charcoal RealityKit base, matching 28pt floating title and status bars,
 and 28pt alternating task rows. Search, status filters, adding tasks, settings,
 and task actions share this window. File and directory browsing, confirmation,
 errors, file priorities, Tracker diagnostics and peer connections are embedded pages.

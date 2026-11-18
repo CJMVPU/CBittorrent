@@ -133,23 +133,23 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool { false }
 
     private func buildTitlebar() {
-        let titlebar = TitlebarView(frame: DeckLayout.title.insetBy(dx: 0, dy: 4))
+        let titlebar = TitlebarView(frame: DeckLayout.title)
         surface.addSubview(titlebar)
-        titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 4, width: 50, height: 24)))
-        let mark = NSImageView(frame: NSRect(x: 78, y: 2, width: 28, height: 28))
+        titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 2, width: 50, height: 24)))
+        let mark = NSImageView(frame: NSRect(x: 80, y: 2, width: 24, height: 24))
         if let iconURL = Bundle.main.url(forResource: "CBittorrent", withExtension: "icns") {
             mark.image = NSImage(contentsOf: iconURL)
         }
         mark.setAccessibilityLabel("CBittorrent")
         titlebar.addSubview(mark)
         buildTransferControls(in: titlebar)
-        settingsButton.frame = NSRect(x: 822, y: 5, width: 65, height: 22)
+        settingsButton.frame = NSRect(x: 822, y: 3, width: 65, height: 22)
         settingsButton.handler = { [weak self] in self?.showSettings() }
         titlebar.addSubview(settingsButton)
     }
 
     private func buildTransferControls(in titlebar: NSView) {
-        filterPicker.frame = NSRect(x: 120, y: 4, width: 128, height: 24)
+        filterPicker.frame = NSRect(x: 120, y: 2, width: 128, height: 24)
         filterPicker.font = Titanium.font(11)
         filterPicker.controlSize = .small
         filterPicker.isBordered = false
@@ -169,7 +169,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         search.drawsBackground = true
         search.isEditable = true
         search.isSelectable = true
-        search.frame = NSRect(x: 258, y: 4, width: 324, height: 24)
+        search.frame = NSRect(x: 258, y: 2, width: 324, height: 24)
         search.placeholderString = "搜索任务"
         search.font = Titanium.font(11)
         search.focusRingType = .none
@@ -178,7 +178,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         search.setAccessibilityLabel("搜索任务")
         titlebar.addSubview(search)
 
-        let add = ActionButton("添加", symbol: "plus", frame: NSRect(x: 592, y: 4, width: 60, height: 24)) { [weak store] in store?.addTorrentPrompt() }
+        let add = ActionButton("添加", symbol: "plus", frame: NSRect(x: 592, y: 2, width: 60, height: 24)) { [weak store] in store?.addTorrentPrompt() }
         add.active = true
         add.toolTip = "添加种子文件或磁力链接 (⌘O)"
         titlebar.addSubview(add)
@@ -189,14 +189,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             ("trash", "移除所选任务", { [weak store] in store?.removeSelected() })
         ]
         for (symbol, label, handler) in actions {
-            let button = ActionButton(symbol: symbol, frame: NSRect(x: x, y: 4, width: 27, height: 24), action: handler)
+            let button = ActionButton(symbol: symbol, frame: NSRect(x: x, y: 2, width: 27, height: 24), action: handler)
             button.toolTip = label
             button.setAccessibilityLabel(label)
             titlebar.addSubview(button)
             selectionButtons.append(button)
             x += 30
         }
-        let more = ActionButton(symbol: "ellipsis", frame: NSRect(x: x, y: 4, width: 27, height: 24))
+        let more = ActionButton(symbol: "ellipsis", frame: NSRect(x: x, y: 2, width: 27, height: 24))
         more.toolTip = "更多任务操作"
         more.setAccessibilityLabel("更多任务操作")
         more.handler = { [weak self, weak more] in
@@ -279,7 +279,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     }
 
     private func buildStatusbar() {
-        let statusbar = SurfaceView(frame: DeckLayout.status.insetBy(dx: 0, dy: 3))
+        let statusbar = SurfaceView(frame: DeckLayout.status)
         surface.addSubview(statusbar)
         let widths: [CGFloat] = StatusBarPresentation.widths
         var x: CGFloat = 13
