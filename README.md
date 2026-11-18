@@ -1,11 +1,11 @@
 # CBittorrent
 
 A native BitTorrent client for **macOS 27+ on Apple Silicon**.
-Built with Swift, AppKit and libtorrent. No Qt dependency.
+Built with Swift, AppKit, RealityKit and libtorrent. No Qt dependency.
 
 ## Features
 
-- Fixed 900 × 600 window with compact, alternating task rows.
+- Dark 932 × 650 window with floating RealityKit bars and compact task rows.
 - Search, filters, settings and task actions in one window.
 - Torrent and magnet input, pause/resume and file priorities.
 - Tracker settings, connection limits and saved task state.

@@ -2,20 +2,22 @@ import AppKit
 import QuartzCore
 
 enum Titanium {
-    static let background = NSColor(hex: 0xF9FAFB)
-    static let panel = NSColor.white
-    static let chrome = NSColor(hex: 0xEEF0F3)
-    static let text = NSColor(hex: 0x303744)
-    static let muted = NSColor(hex: 0x626D7C)
-    static let accent = NSColor(hex: 0x5D7DB4)
-    static let selection = NSColor(hex: 0xEAF0F9)
-    static let hover = NSColor(hex: 0xE8EBEF)
-    static let green = NSColor(hex: 0x39846B)
-    static let orange = NSColor(hex: 0xAD8144)
-    static let red = NSColor(hex: 0xB45E69)
+    static let background = NSColor(hex: 0x121820)
+    static let panel = NSColor(hex: 0x1A222C)
+    static let chrome = NSColor(hex: 0x303F50)
+    static let text = NSColor(hex: 0xE7EDF5)
+    static let muted = NSColor(hex: 0xB2C0D0)
+    static let accent = NSColor(hex: 0x99C7FF)
+    static let selection = NSColor(hex: 0x304866)
+    static let hover = NSColor(hex: 0x344456)
+    static let green = NSColor(hex: 0x76CFAB)
+    static let orange = NSColor(hex: 0xE6B578)
+    static let red = NSColor(hex: 0xF198A2)
+
+    static let stripe = NSColor(hex: 0x202A36)
+    static let rail = NSColor(hex: 0x38495D)
 
     // A single point increase keeps every view on the same typographic scale.
-    // Header/footer geometry remains 32/27 points.
     static func font(_ baseSize: CGFloat) -> NSFont {
         let size = baseSize + 1
         return NSFont(name: "LXGWWenKaiMono-Medium", size: size)

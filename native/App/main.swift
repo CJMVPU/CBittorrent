@@ -127,6 +127,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
 
 MainActor.assumeIsolated {
     let application = NSApplication.shared
+    application.appearance = NSAppearance(named: .darkAqua)
     application.setActivationPolicy(.regular)
     let delegate = ApplicationDelegate()
     application.delegate = delegate

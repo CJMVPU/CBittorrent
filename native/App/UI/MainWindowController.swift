@@ -4,8 +4,9 @@ import AppKit
 final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource,
                                   NSTableViewDelegate, NSSearchFieldDelegate {
     private let store: AppStore
-    private let surface = SurfaceView(frame: NSRect(x: 0, y: 0, width: 900, height: 600), color: Titanium.panel)
-    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 32, width: 888, height: 493))
+    private let surface = WindowDeck(showsStatus: true)
+    private let transferPage = SurfaceView(frame: NSRect(origin: .zero, size: DeckLayout.page.size))
+    private let scrollView = NSScrollView(frame: NSRect(x: 6, y: 0, width: 888, height: 493))
     private let table = StripedTransferTableView()
     private let search = NSSearchField()
     private let emptyLabel = Titanium.label("添加种子文件或磁力链接，开始第一次传输。", size: 13, color: Titanium.muted, alignment: .center)
@@ -27,7 +28,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     init(store: AppStore) {
         self.store = store
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+        let window = NSWindow(contentRect: DeckLayout.window,
                               styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         super.init(window: window)
@@ -39,23 +40,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         window.collectionBehavior = [.fullScreenNone]
         window.tabbingMode = .disallowed
         window.hasShadow = true
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = surface
-        window.contentMinSize = NSSize(width: 900, height: 600)
-        window.contentMaxSize = NSSize(width: 900, height: 600)
+        window.contentMinSize = DeckLayout.window.size
+        window.contentMaxSize = DeckLayout.window.size
         window.delegate = self
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(type)?.isHidden = true
         }
         window.center()
+        surface.page.addSubview(transferPage)
         buildTitlebar()
         buildTable()
         buildStatusbar()
         buildSelectionBar()
         settingsView = SettingsView(store: store) { [weak self] in self?.showTransfers() }
-        settingsView.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
+        settingsView.frame = surface.page.bounds
         settingsView.isHidden = true
-        surface.addSubview(settingsView)
+        surface.page.addSubview(settingsView)
         store.onPresent = { [weak self] request in self?.present(request) }
         store.onChange = { [weak self] in self?.refresh() }
         refresh()
@@ -77,14 +79,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             self.flows.popLast()?.view.removeFromSuperview()
             if let previous = self.flows.last { previous.view.isHidden = false }
             else if self.showingSettings { self.settingsView.isHidden = false }
-            else { self.scrollView.isHidden = false }
+            else { self.transferPage.isHidden = false }
             self.refresh()
         }
-        page.frame = NSRect(x: 0, y: 32, width: 900, height: 541)
+        page.frame = surface.page.bounds
         flows.append(FlowEntry(token: token, view: page))
-        surface.addSubview(page)
+        surface.page.addSubview(page)
         settingsView.isHidden = true
-        scrollView.isHidden = true
+        transferPage.isHidden = true
         emptyLabel.isHidden = true
         selectionButtons.forEach { $0.isEnabled = false }
         NSApp.unhide(nil)
@@ -99,7 +101,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         if !showingSettings { settingsView.reload() }
         showingSettings = true
         settingsView.isHidden = false
-        scrollView.isHidden = true
+        transferPage.isHidden = true
         emptyLabel.isHidden = true
         settingsButton.active = true
         selectionButtons.forEach { $0.isEnabled = false }
@@ -109,7 +111,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         clearFlows()
         showingSettings = false
         settingsView.isHidden = true
-        scrollView.isHidden = false
+        transferPage.isHidden = false
         settingsButton.active = false
         refresh()
     }
@@ -131,7 +133,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool { false }
 
     private func buildTitlebar() {
-        let titlebar = TitlebarView(frame: NSRect(x: 0, y: 0, width: 900, height: 32), color: Titanium.chrome)
+        let titlebar = TitlebarView(frame: DeckLayout.title.insetBy(dx: 0, dy: 4))
         surface.addSubview(titlebar)
         titlebar.addSubview(WindowControlButtons(frame: NSRect(x: 12, y: 4, width: 50, height: 24)))
         let mark = NSImageView(frame: NSRect(x: 78, y: 2, width: 28, height: 28))
@@ -251,13 +253,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         scrollView.drawsBackground = true
         scrollView.backgroundColor = Titanium.panel
         scrollView.documentView = table
-        surface.addSubview(scrollView)
+        transferPage.addSubview(scrollView)
         emptyLabel.frame = NSRect(x: 30, y: 285, width: 840, height: 26)
-        surface.addSubview(emptyLabel)
+        transferPage.addSubview(emptyLabel)
     }
 
     private func buildSelectionBar() {
-        let bar = SurfaceView(frame: NSRect(x: 0, y: 525, width: 900, height: 48), color: Titanium.background)
+        let bar = SurfaceView(frame: NSRect(x: 0, y: 493, width: 900, height: 48), color: Titanium.background)
         selectionSummary.frame = NSRect(x: 16, y: 5, width: 520, height: 20)
         bar.addSubview(selectionSummary)
         selectionMetrics.frame = NSRect(x: 16, y: 26, width: 520, height: 17)
@@ -273,11 +275,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             bar.addSubview(button)
             selectionButtons.append(button)
         }
-        surface.addSubview(bar)
+        transferPage.addSubview(bar)
     }
 
     private func buildStatusbar() {
-        let statusbar = SurfaceView(frame: NSRect(x: 0, y: 573, width: 900, height: 27), color: Titanium.chrome)
+        let statusbar = SurfaceView(frame: DeckLayout.status.insetBy(dx: 0, dy: 3))
         surface.addSubview(statusbar)
         let widths: [CGFloat] = StatusBarPresentation.widths
         var x: CGFloat = 13

@@ -28,7 +28,7 @@ final class InWindowFlowView: SurfaceView {
     init(request: InWindowRequest, store: AppStore, onClose: @escaping () -> Void) {
         self.store = store
         self.onClose = onClose
-        super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 541), color: Titanium.panel)
+        super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 541))
         let back = button("返回", symbol: "arrow.left", frame: NSRect(x: 24, y: 16, width: 112, height: 28), action: onClose)
         back.restingColor = Titanium.background
         feedback.frame = NSRect(x: 28, y: 440, width: 844, height: 42)
@@ -57,7 +57,7 @@ final class InWindowFlowView: SurfaceView {
         case .about:
             heading("关于 CBittorrent", subtitle: "原生 macOS · Apple Silicon")
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-            textArea("CBittorrent \(version)\n\nSwift / AppKit 原生界面，libtorrent 下载引擎。\n参考 qBittorrent 的业务逻辑；GPL-2.0-or-later。\n\n字体：LXGW WenKai Mono Medium\n运行平台：macOS 27 及更新版本 · Apple Silicon", frame: NSRect(x: 28, y: 145, width: 844, height: 280))
+            textArea("CBittorrent \(version)\n\nRealityKit / AppKit 深色界面，libtorrent 下载引擎。\n参考 qBittorrent 的业务逻辑；GPL-2.0-or-later。\n\n字体：LXGW WenKai Mono Medium\n运行平台：macOS 27 及更新版本 · Apple Silicon", frame: NSRect(x: 28, y: 145, width: 844, height: 280))
         case .browseLocation(let initial):
             showBrowser(mode: .browse, initial: initial) { _ in }
         case .chooseDirectory(let initial, let onSelect):

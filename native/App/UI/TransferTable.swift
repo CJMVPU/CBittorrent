@@ -39,7 +39,7 @@ final class StripedTransferTableView: NSTableView {
         let first = max(0, Int(floor(clipRect.minY / pitch)))
         let last = Int(ceil(clipRect.maxY / pitch))
         guard first <= last else { return }
-        NSColor(hex: 0xF2F4F7).setFill()
+        Titanium.stripe.setFill()
         for row in first...last where row % 2 == 1 {
             NSRect(x: clipRect.minX, y: CGFloat(row) * pitch,
                    width: clipRect.width, height: pitch).intersection(clipRect).fill()
@@ -51,7 +51,7 @@ final class TransferRowView: NSTableRowView {
     var alternate = false { didSet { needsDisplay = true } }
 
     override func drawBackground(in dirtyRect: NSRect) {
-        (alternate ? NSColor(hex: 0xF2F4F7) : Titanium.panel).setFill()
+        (alternate ? Titanium.stripe : Titanium.panel).setFill()
         dirtyRect.fill()
     }
 

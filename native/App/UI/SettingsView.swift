@@ -42,7 +42,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
     init(store: AppStore, onBack: @escaping () -> Void) {
         self.store = store
         draft = store.settings
-        super.init(color: Titanium.panel)
+        super.init()
         let sidebar = SurfaceView(frame: NSRect(x: 0, y: 0, width: 156, height: 541), color: Titanium.background)
         addSubview(sidebar)
         let back = ActionButton("返回传输", symbol: "arrow.left", frame: NSRect(x: 16, y: 16, width: 124, height: 32), action: onBack)
@@ -270,7 +270,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
     private func underlineContainer(in view: NSView, y: CGFloat) -> SurfaceView {
         let container = SurfaceView(frame: NSRect(x: inputColumnX, y: y + 9, width: inputWidth, height: 30), color: Titanium.panel, radius: 6)
         container.layer?.borderWidth = 1
-        container.layer?.borderColor = NSColor(hex: 0xD5DBE4).cgColor
+        container.layer?.borderColor = Titanium.chrome.cgColor
         view.addSubview(container)
         return container
     }
@@ -412,7 +412,7 @@ final class SettingsView: SurfaceView, NSTextFieldDelegate, NSTextViewDelegate {
         editorScroll.wantsLayer = true
         editorScroll.layer?.cornerRadius = 7
         editorScroll.layer?.borderWidth = 1
-        editorScroll.layer?.borderColor = NSColor(hex: 0xDCE1E8).cgColor
+        editorScroll.layer?.borderColor = Titanium.chrome.cgColor
         editorScroll.layer?.masksToBounds = true
 
         let editor = NSTextView(frame: editorScroll.contentView.bounds)
