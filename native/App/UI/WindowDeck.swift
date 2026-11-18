@@ -6,9 +6,9 @@ import Metal
 enum DeckLayout {
     static let window = NSRect(x: 0, y: 0, width: 932, height: 650)
     static let barHeight: CGFloat = 28
-    static let title = NSRect(x: 16, y: 10, width: 900, height: barHeight)
+    static let title = NSRect(x: 5, y: 4, width: window.width - 10, height: barHeight)
     static let page = NSRect(x: 16, y: (window.height - 541) / 2, width: 900, height: 541)
-    static let status = NSRect(x: 16, y: window.height - title.minY - barHeight, width: 900, height: barHeight)
+    static let status = title.offsetBy(dx: 0, dy: window.height - 2 * title.minY - barHeight)
 }
 
 @MainActor
@@ -46,7 +46,8 @@ private struct DeckScene {
         for rect in showsStatus ? [DeckLayout.title, DeckLayout.status] : [DeckLayout.title] {
             let foot = slab(rect.offsetBy(dx: 0, dy: 2), depth: 4, radius: 2, z: 0, color: Titanium.background)
             renderer.entities.append(foot)
-            let beam = slab(rect, depth: 8, radius: 4, z: 5, color: Titanium.rail)
+            let beam = slab(rect, depth: 12, radius: 6, z: 5, color: Titanium.rail)
+            beam.scale.z = 2.0 / 3.0
             renderer.entities.append(beam)
         }
         let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))

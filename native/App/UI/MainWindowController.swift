@@ -146,6 +146,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         settingsButton.frame = NSRect(x: 822, y: 3, width: 65, height: 22)
         settingsButton.handler = { [weak self] in self?.showSettings() }
         titlebar.addSubview(settingsButton)
+        let content = titlebar.subviews.reduce(NSRect.null) { $0.union($1.frame) }
+        for control in titlebar.subviews {
+            control.setFrameOrigin(NSPoint(x: control.frame.minX + titlebar.bounds.midX - content.midX,
+                                           y: titlebar.bounds.midY - control.frame.height / 2))
+        }
     }
 
     private func buildTransferControls(in titlebar: NSView) {
@@ -179,7 +184,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         titlebar.addSubview(search)
 
         let add = ActionButton("添加", symbol: "plus", frame: NSRect(x: 592, y: 2, width: 60, height: 24)) { [weak store] in store?.addTorrentPrompt() }
-        add.active = true
+        add.tint = Titanium.accent
+        add.hoverColor = .clear
         add.toolTip = "添加种子文件或磁力链接 (⌘O)"
         titlebar.addSubview(add)
         var x: CGFloat = 661
@@ -282,10 +288,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         let statusbar = SurfaceView(frame: DeckLayout.status)
         surface.addSubview(statusbar)
         let widths: [CGFloat] = StatusBarPresentation.widths
-        var x: CGFloat = 13
+        var x = statusbar.bounds.midX - widths.reduce(0, +) / 2
         for width in widths {
-            let label = Titanium.label(size: 10, color: Titanium.muted)
-            label.frame = NSRect(x: x, y: 6, width: width - 8, height: 16)
+            let label = Titanium.label(size: 10, color: Titanium.muted, alignment: .center)
+            let height = ceil(label.intrinsicContentSize.height)
+            label.frame = NSRect(x: x + 4, y: statusbar.bounds.midY - height / 2, width: width - 8, height: height)
             statusbar.addSubview(label)
             statusLabels.append(label)
             x += width
