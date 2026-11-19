@@ -218,9 +218,10 @@ for ownership and unimplemented features. Native tests live under `native/tests/
 The older UI specifications are preserved in [CHANGELOG.md](CHANGELOG.md).
 
 Use the installed app in `/Applications` for normal launch/quit acceptance.
-Keep older app backups as ZIP archives so Launch Services does not discover
-multiple obsolete copies with the same bundle identifier. Updating the bundle
-must preserve the application support profile and downloaded files.
+For local deployment, verify the new bundle, quit the installed app gracefully,
+and replace it in place. Verify the installed signature and executable before
+permanently removing the replaced app, local staging copies and installer archives.
+Keep only the installed bundle. Preserve the application support profile and downloaded files.
 
 ## Connection diagnostics
 
